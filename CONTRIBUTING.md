@@ -4,7 +4,11 @@ Start with the [MVP plan](docs/zh-CN/mvp.md) and the [API contract](spec/api.md)
 
 ## SDK packages
 
-Run `bash scripts/package-sdks.sh` after installing workspace dependencies. It builds the npm tarball, Python wheel, and Python source distribution, installs them in isolated directories, and runs the shared SDK conformance suites against the installed packages. Publish the exact verified npm tarball. The manually dispatched [PyPI workflow](.github/workflows/publish-pypi.yml) runs the package checks before publishing its verified Python artifacts with Trusted Publishing.
+Run `bash scripts/package-sdks.sh` after installing workspace dependencies. It builds the npm tarball, Python wheel, and Python source distribution, installs them in isolated directories, and runs the shared SDK conformance suites against the installed packages.
+
+Manually run the [npm workflow](.github/workflows/publish-npm.yml) to rehearse the release with `npm publish --dry-run`. To release, push a `node-v<version>` tag on a commit from `main`. The tag must match `sdks/node/package.json`. GitHub Actions uploads the verified tarball to npm using Trusted Publishing. The `gabriel-calendar` npm package must trust `Easy-Ez/gabriel-calendar`, workflow `publish-npm.yml`, environment `npm`, with direct publishing allowed. npm expires a new binding if it does not complete a successful publish within two days.
+
+The manually dispatched [PyPI workflow](.github/workflows/publish-pypi.yml) runs the package checks before publishing its verified Python artifacts with Trusted Publishing.
 
 ## Public repository boundary
 
