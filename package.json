@@ -12,6 +12,7 @@
     "build": "tsc && npm run build -w gabriel-calendar",
     "migrate": "node dist/service/src/main.js migrate",
     "start": "node dist/service/src/main.js",
+    "release": "node scripts/release.mjs",
     "test": "npm run build && bash scripts/test-postgres.sh && npm run test -w gabriel-calendar",
     "test:python": "uv run --locked --project sdks/python python -m unittest discover -s sdks/python/tests"
   },
