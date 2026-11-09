@@ -44,3 +44,6 @@ for distribution in "${wheels[0]}" "${source_packages[0]}"; do
 done
 
 printf '\nVerified SDK distributions in %s\n' "$out"
+if [[ -n ${GITHUB_OUTPUT:-} ]]; then
+  printf 'package-dir=%s\n' "$out" >> "$GITHUB_OUTPUT"
+fi
