@@ -19,6 +19,7 @@ const client = await CalendarClient.connect({
   baseUrl: process.env.GABRIEL_BASE_URL,
   getProjectCredential: () => process.env.GABRIEL_PROJECT_SESSION,
 });
+
 client.on("invitation.received", (notice) => {
   console.log(notice.type);
 });
@@ -53,6 +54,19 @@ Register handlers and call `start()` as above. The SDK acknowledges notification
 
 ## Client API
 
-Ask the service operator to enable writes you need, then request `canRsvp`, `canCreate`, or `canManage` when pairing the consumer. For a guest event, also request `canInvite` and set `notifyGuests` explicitly on each write. Creation takes an idempotency key, and updates and cancellations take the current event version.
+| What you want to do | Method |
+| --- | --- |
+| Authorize a Google account | `await CalendarClient.connect({ baseUrl, getProjectCredential, saveGrant })` |
+| Attach to a saved consumer | `new CalendarClient({ baseUrl, connectionId, consumerId, getCredential })` |
+| Register a handler | `client.on(type, handler)` returns an unsubscribe function |
+| Start and stop SSE | `await client.start()` and `await client.stop()` |
+| List pending invitations | `await client.events.listInvitations({ calendarId, pageCursor, limit })` |
+| Reply to an invitation | `await client.events.rsvp(ref, status, { ifMatch })` |
+| Create an event | `await client.events.create("primary", input, { idempotencyKey, notifyGuests })` |
+| Update or cancel | `await client.events.update(ref, patch, { ifMatch, notifyGuests })` or `await client.events.cancel(ref, { ifMatch, notifyGuests })` |
+
+Register handlers for `invitation.received`, `event.created`, `event.updated`, `event.cancelled`, or `event.rsvp_changed`. RSVP accepts `accepted`, `tentative`, or `declined`. Use the `ref` and current `version` from the event snapshot when updating or cancelling.
+
+Ask the service operator to enable writes you need, then request `canRsvp`, `canCreate`, or `canManage` when pairing the consumer. For a guest event, also request `canInvite` and set `notifyGuests` explicitly on each write.
 
 [SDK method reference](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-surface) · [Client examples](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-examples) · [Service operator setup](https://github.com/Easy-Ez/gabriel-calendar/blob/main/docs/zh-CN/testing.md)

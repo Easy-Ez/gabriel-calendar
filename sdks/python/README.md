@@ -63,6 +63,19 @@ Register handlers and enter `async with client` as above. The SDK acknowledges n
 
 ## Client API
 
-Ask the service operator to enable writes you need, then request `can_rsvp`, `can_create`, or `can_manage` when pairing the consumer. For a guest event, also request `can_invite` and set `notify_guests` explicitly on each write. Creation takes an idempotency key, and updates and cancellations take the current event version.
+| What you want to do | Method |
+| --- | --- |
+| Authorize a Google account | `await CalendarClient.connect(base_url=..., get_project_credential=..., save_grant=...)` |
+| Attach to a saved consumer | `CalendarClient(base_url=..., connection_id=..., consumer_id=..., get_credential=...)` |
+| Register a handler | `client.on(type, handler)` returns an unsubscribe function, or use `@client.on(type)` |
+| Start and stop SSE | `async with client`, or `await client.start()` and `await client.stop()` |
+| List pending invitations | `await client.events.list_invitations(calendar_id=..., page_cursor=..., limit=...)` |
+| Reply to an invitation | `await client.events.rsvp(ref, status, if_match=...)` |
+| Create an event | `await client.events.create("primary", title=..., start=..., end=..., idempotency_key=..., notify_guests=...)` |
+| Update or cancel | `await client.events.update(ref, start=..., end=..., if_match=..., notify_guests=...)` or `await client.events.cancel(ref, if_match=..., notify_guests=...)` |
+
+Register handlers for `invitation.received`, `event.created`, `event.updated`, `event.cancelled`, or `event.rsvp_changed`. RSVP accepts `accepted`, `tentative`, or `declined`. Use the `ref` and current `version` from the event snapshot when updating or cancelling.
+
+Ask the service operator to enable writes you need, then request `can_rsvp`, `can_create`, or `can_manage` when pairing the consumer. For a guest event, also request `can_invite` and set `notify_guests` explicitly on each write.
 
 [SDK method reference](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-surface) · [Client examples](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-examples) · [Service operator setup](https://github.com/Easy-Ez/gabriel-calendar/blob/main/docs/zh-CN/testing.md)
