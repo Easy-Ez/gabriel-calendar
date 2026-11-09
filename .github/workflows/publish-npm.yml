@@ -45,7 +45,8 @@ jobs:
           PACKAGE_DIR: ${{ steps.package-sdks.outputs.package-dir }}
         run: |
           npm --version
-          npm publish "$PACKAGE_DIR"/gabriel-calendar-*.tgz --dry-run
+          # Rehearsals can use a version already on npm.
+          npm publish "$PACKAGE_DIR"/gabriel-calendar-*.tgz --dry-run --force
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: npm-distribution
