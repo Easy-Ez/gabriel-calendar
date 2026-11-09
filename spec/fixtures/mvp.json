@@ -1,0 +1,649 @@
+{
+  "connectionId": "10000000-0000-4000-8000-000000000001",
+  "consumerId": "10000000-0000-4000-8000-000000000002",
+  "requestId": "10000000-0000-4000-8000-000000000004",
+  "notifications": {
+    "invitation": {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:1",
+      "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "invitation.received",
+      "changedFields": [
+        "status",
+        "myResponse"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v1\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "needsAction",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    },
+    "rsvp": {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:2",
+      "cursor": "2.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "event.rsvp_changed",
+      "changedFields": [
+        "myResponse"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v2\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "tentative",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    },
+    "cancellation": {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:3",
+      "cursor": "3.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "event.cancelled",
+      "changedFields": [
+        "status"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "cancelled",
+        "recurringEventId": "sampleseries"
+      },
+      "reason": "provider_cancelled_or_removed"
+    },
+    "providerGap": {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:4",
+      "cursor": "4.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "connection.gap",
+      "changedFields": [],
+      "reason": "provider_cursor_expired"
+    }
+  },
+  "invalidNotifications": [
+    {
+      "schemaVersion": 2,
+      "notificationId": "10000000-0000-4000-8000-000000000001:1",
+      "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "invitation.received",
+      "changedFields": [
+        "status",
+        "myResponse"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v1\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "needsAction",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:1",
+      "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "invitation.received",
+      "changedFields": [
+        "unexpected"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v1\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "needsAction",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:1",
+      "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "invitation.received",
+      "changedFields": [
+        "status",
+        "myResponse"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "other"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v1\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "needsAction",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "notificationId": "10000000-0000-4000-8000-000000000001:1",
+      "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "connectionId": "10000000-0000-4000-8000-000000000001",
+      "observedAt": "2030-01-01T00:00:00.000Z",
+      "type": "invitation.received",
+      "changedFields": [
+        "status",
+        "myResponse"
+      ],
+      "ref": {
+        "calendarId": "guest@example.invalid",
+        "eventId": "sampleinvite"
+      },
+      "event": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v1\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "date": "2030-02-30"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "needsAction",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      }
+    }
+  ],
+  "steps": [
+    {
+      "method": "POST",
+      "path": "/v1/connect-sessions",
+      "status": 201,
+      "payload": {
+        "sessionId": "10000000-0000-4000-8000-000000000003",
+        "authorizationUrl": "https://consent.example.invalid/authorize"
+      },
+      "project": true
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connect-sessions/10000000-0000-4000-8000-000000000003",
+      "status": 200,
+      "payload": {
+        "status": "connected",
+        "connectionId": "10000000-0000-4000-8000-000000000001"
+      },
+      "project": true
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers",
+      "status": 201,
+      "payload": {
+        "connectionId": "10000000-0000-4000-8000-000000000001",
+        "consumerId": "10000000-0000-4000-8000-000000000002"
+      },
+      "body": {
+        "canRsvp": true,
+        "canCreate": true,
+        "canManage": true,
+        "canInvite": true
+      },
+      "project": true,
+      "grant": true
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/primary/events",
+      "idempotencyKey": "synthetic-create-01",
+      "status": 201,
+      "body": {
+        "title": "Synthetic appointment",
+        "start": "2030-01-02T12:00:00Z",
+        "end": "2030-01-02T12:15:00Z",
+        "showAs": "free",
+        "guests": [
+          "attendee@example.invalid"
+        ],
+        "notifyGuests": true
+      },
+      "payload": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "syntheticcreated"
+        },
+        "status": "confirmed",
+        "title": "Synthetic appointment",
+        "start": {
+          "dateTime": "2030-01-02T12:00:00Z"
+        },
+        "end": {
+          "dateTime": "2030-01-02T12:15:00Z"
+        },
+        "version": "\"created\""
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/primary/events",
+      "idempotencyKey": "synthetic-create-01",
+      "status": 409,
+      "body": {
+        "title": "Changed appointment",
+        "start": "2030-01-02T12:00:00Z",
+        "end": "2030-01-02T12:15:00Z",
+        "showAs": "free",
+        "guests": [
+          "attendee@example.invalid"
+        ],
+        "notifyGuests": true
+      },
+      "payload": {
+        "error": {
+          "code": "IDEMPOTENCY_CONFLICT"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/guest%40example.invalid/events/syntheticcreated",
+      "ifMatch": "\"created\"",
+      "status": 200,
+      "body": {
+        "start": "2030-01-02T12:15:00Z",
+        "end": "2030-01-02T12:30:00Z",
+        "notifyGuests": false
+      },
+      "payload": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "syntheticcreated"
+        },
+        "status": "confirmed",
+        "title": "Synthetic appointment",
+        "start": {
+          "dateTime": "2030-01-02T12:15:00Z"
+        },
+        "end": {
+          "dateTime": "2030-01-02T12:30:00Z"
+        },
+        "version": "\"updated\""
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/guest%40example.invalid/events/syntheticcreated/cancel",
+      "ifMatch": "\"created\"",
+      "status": 409,
+      "body": {
+        "notifyGuests": true
+      },
+      "payload": {
+        "error": {
+          "code": "VERSION_CONFLICT"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/guest%40example.invalid/events/syntheticcreated/cancel",
+      "ifMatch": "\"updated\"",
+      "status": 200,
+      "body": {
+        "notifyGuests": true
+      },
+      "payload": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "syntheticcreated"
+        },
+        "status": "cancelled"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/primary/events?rsvp=needsAction",
+      "status": 200,
+      "payload": {
+        "events": [
+          {
+            "ref": {
+              "calendarId": "guest@example.invalid",
+              "eventId": "sampleinvite"
+            },
+            "status": "confirmed",
+            "version": "\"v1\"",
+            "title": "Synthetic invitation",
+            "start": {
+              "dateTime": "2030-01-01T12:00:00+08:00",
+              "timeZone": "Asia/Shanghai"
+            },
+            "end": {
+              "dateTime": "2030-01-01T13:00:00+08:00",
+              "timeZone": "Asia/Shanghai"
+            },
+            "myResponse": "needsAction",
+            "recurringEventId": "sampleseries",
+            "originalStartTime": {
+              "date": "2030-01-01"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/guest%40example.invalid/events/sampleinvite/rsvp",
+      "status": 200,
+      "payload": {
+        "ref": {
+          "calendarId": "guest@example.invalid",
+          "eventId": "sampleinvite"
+        },
+        "status": "confirmed",
+        "version": "\"v2\"",
+        "title": "Synthetic invitation",
+        "start": {
+          "dateTime": "2030-01-01T12:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "end": {
+          "dateTime": "2030-01-01T13:00:00+08:00",
+          "timeZone": "Asia/Shanghai"
+        },
+        "myResponse": "tentative",
+        "recurringEventId": "sampleseries",
+        "originalStartTime": {
+          "date": "2030-01-01"
+        }
+      },
+      "body": {
+        "status": "tentative"
+      },
+      "ifMatch": "\"v1\""
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/calendars/guest%40example.invalid/events/sampleinvite/rsvp",
+      "status": 409,
+      "payload": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "message": "Synthetic error"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004"
+      },
+      "body": {
+        "status": "tentative"
+      },
+      "ifMatch": "\"stale\""
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 429,
+      "payload": {
+        "error": {
+          "code": "RATE_LIMITED",
+          "message": "Synthetic error"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004"
+      },
+      "retryAfter": 1
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 200,
+      "stream": [
+        "invitation",
+        "rsvp"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 200,
+      "stream": [
+        "invitation",
+        "rsvp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/ack",
+      "status": 503,
+      "payload": {
+        "error": {
+          "code": "PROVIDER_UNAVAILABLE",
+          "message": "Synthetic error"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004"
+      },
+      "body": {
+        "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 200,
+      "stream": [
+        "invitation",
+        "rsvp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/ack",
+      "status": 204,
+      "body": {
+        "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/ack",
+      "status": 204,
+      "body": {
+        "cursor": "2.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 200,
+      "stream": [
+        "providerGap"
+      ],
+      "streamError": {
+        "error": {
+          "code": "CURSOR_EXPIRED",
+          "message": "Synthetic error"
+        },
+        "requestId": "10000000-0000-4000-8000-000000000004",
+        "status": 410
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/ack",
+      "status": 204,
+      "body": {
+        "cursor": "4.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    }
+  ],
+  "authError": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Synthetic error"
+    },
+    "requestId": "10000000-0000-4000-8000-000000000004"
+  },
+  "expectedRetries": [
+    [
+      "RATE_LIMITED",
+      1000
+    ],
+    [
+      "HANDLER_FAILED",
+      500
+    ],
+    [
+      "PROVIDER_UNAVAILABLE",
+      1000
+    ],
+    [
+      "NETWORK_ERROR",
+      250
+    ]
+  ],
+  "drainSteps": [
+    {
+      "method": "GET",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/stream",
+      "status": 200,
+      "stream": [
+        "invitation",
+        "rsvp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers/10000000-0000-4000-8000-000000000002/ack",
+      "status": 204,
+      "body": {
+        "cursor": "1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    }
+  ],
+  "createInput": {
+    "title": "Synthetic appointment",
+    "start": "2030-01-02T12:00:00Z",
+    "end": "2030-01-02T12:15:00Z",
+    "showAs": "free",
+    "guests": [
+      "attendee@example.invalid"
+    ],
+    "notifyGuests": true
+  },
+  "createKey": "synthetic-create-01",
+  "updateInput": {
+    "start": "2030-01-02T12:15:00Z",
+    "end": "2030-01-02T12:30:00Z"
+  }
+}

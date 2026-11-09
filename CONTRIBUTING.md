@@ -1,6 +1,10 @@
 # Contributing
 
-Start with the [MVP plan](docs/zh-CN/mvp.md) and the [API draft](spec/api.md). When changing an SDK behavior, update the shared [behavior specification](spec/behavior.md) and the Node.js and Python conformance cases together once the implementations exist.
+Start with the [MVP plan](docs/zh-CN/mvp.md) and the [API contract](spec/api.md). When changing an SDK behavior, update the shared [behavior specification](spec/behavior.md) and the Node.js and Python conformance cases together. Run `npm test` for the simulated Google service and Node.js, and `npm run test:python` for Python.
+
+## SDK packages
+
+Run `bash scripts/package-sdks.sh` after installing workspace dependencies. It builds the npm tarball, Python wheel, and Python source distribution, installs them in isolated directories, and runs the shared SDK conformance suites against the installed packages. Publish the exact verified npm tarball. The manually dispatched [PyPI workflow](.github/workflows/publish-pypi.yml) runs the package checks before publishing its verified Python artifacts with Trusted Publishing.
 
 ## Public repository boundary
 

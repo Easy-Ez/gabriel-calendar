@@ -1,0 +1,28 @@
+{
+  "name": "gabriel-calendar-workspace",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "sdks/node"
+  ],
+  "scripts": {
+    "build": "tsc && npm run build -w gabriel-calendar",
+    "migrate": "node dist/service/src/main.js migrate",
+    "start": "node dist/service/src/main.js",
+    "test": "npm run build && bash scripts/test-postgres.sh && npm run test -w gabriel-calendar",
+    "test:python": "uv run --locked --project sdks/python python -m unittest discover -s sdks/python/tests"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/pg": "8.23.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "typescript": "5.9.3"
+  }
+}

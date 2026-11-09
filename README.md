@@ -2,23 +2,39 @@
 
 [简体中文](README.zh-CN.md)
 
-Gabriel Calendar is a planned Node.js and Python SDK for receiving Google Calendar changes and acting on behalf of an authorized user. A hosted service handles Google OAuth, webhook subscriptions, synchronization, and delivery. Client applications make outbound HTTPS requests and can run on a desktop or behind a firewall.
+Gabriel Calendar is a standalone Google Calendar service with Node.js and Python SDKs. It handles Google Web OAuth, webhook subscriptions, incremental synchronization and notification delivery. Local applications use HTTPS to follow changes to an approved user's primary calendar, list pending invitations, RSVP and manage single events with explicit guest notification choices.
 
-This repository contains the MVP design. The service and SDKs are not yet implemented or published.
+The MVP supports one Google test project and approved accounts. Both SDKs run the same protocol fixtures. The service has been exercised against a simulated Google HTTP API and PostgreSQL and in live tests covering invitation, RSVP, rescheduling, cancellation, and SSE replay.
 
-| Capability | First release |
+## SDKs
+
+| SDK | Install a published release | Quickstart |
+| --- | --- | --- |
+| Node.js 22+ | `npm install gabriel-calendar` | [Node.js SDK](sdks/node/README.md) |
+| Python 3.11+ | `python -m pip install gabriel-calendar` | [Python SDK](sdks/python/README.md) |
+
+The SDKs connect to a Gabriel Calendar service. Set up the service and obtain a project session before connecting a Google account. [Service setup](docs/zh-CN/testing.md) · [SDK and HTTP contract](spec/api.md)
+
+## Scope
+
+| Implemented | Later scope |
 | --- | --- |
-| Connect | Authorize a Google account in the browser and watch its primary calendar |
-| Receive | New invitations, event creation, changes, cancellation, and the user's RSVP changes |
-| Respond | Accept, tentatively accept, or decline an invitation |
-| Manage events | List, read, create, edit, and cancel events the user is allowed to manage |
-| Manage calendars | List and read calendars, create a secondary calendar, and edit calendar metadata with the required permission |
+| Account linking with offline access and primary-calendar watch | Calendar selection and management |
+| Durable invitation, event-change, cancellation and RSVP notifications | General event queries and changes to an existing guest list |
+| Pending invitations and the user's own RSVP | Application integration |
+| Creation, conditional updates and cancellation of single timed events, including events with guests | |
 
-The SDK follows the event and lifecycle conventions of [gabriel-slack](https://github.com/Easy-Ez/gabriel-slack). Both languages will share one service protocol and behavior specification.
+## Local verification
 
-- [MVP and onboarding plan (中文)](docs/zh-CN/mvp.md)
-- [SDK and HTTP API draft](spec/api.md)
+```bash
+npm ci
+npm test
+npm run test:python
+```
+
+- [Test deployment and Google acceptance (中文)](docs/zh-CN/testing.md)
+- [SDK and HTTP contract](spec/api.md)
 - [Synchronization and delivery behavior](spec/behavior.md)
 - [Contributing and public repository boundaries](CONTRIBUTING.md)
 
-Gabriel Calendar is an independent project. It is not affiliated with Google. See the [MIT license](LICENSE).
+The SDK follows the event and lifecycle conventions of [gabriel-slack](https://github.com/Easy-Ez/gabriel-slack). Gabriel Calendar is independent of Google and uses the [MIT license](LICENSE).

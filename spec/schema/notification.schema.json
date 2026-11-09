@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gabriel-calendar.example.invalid/spec/schema/notification.schema.json",
+  "title": "Gabriel Calendar notification v1",
+  "type": "object",
+  "required": ["schemaVersion", "notificationId", "cursor", "connectionId", "type", "observedAt", "changedFields"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "notificationId": { "type": "string", "pattern": "^[a-f0-9-]{36}:[1-9][0-9]{0,18}$" },
+    "cursor": { "type": "string", "pattern": "^[1-9][0-9]{0,18}\\.[A-Za-z0-9_-]{43}$" },
+    "connectionId": { "type": "string", "format": "uuid" },
+    "type": {
+      "enum": ["invitation.received", "event.created", "event.updated", "event.cancelled", "event.rsvp_changed", "connection.gap"]
+    },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "changedFields": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["status", "title", "start", "end", "location", "myResponse", "recurringEventId", "originalStartTime"]
+      }
+    },
+    "ref": { "$ref": "#/$defs/ref" },
+    "event": { "$ref": "#/$defs/event" },
+    "reason": { "enum": ["provider_cancelled_or_removed", "provider_cursor_expired"] }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "connection.gap" } } },
+      "then": {
+        "required": ["reason"],
+        "properties": {
+          "ref": false,
+          "event": false,
+          "reason": { "const": "provider_cursor_expired" },
+          "changedFields": { "type": "array", "maxItems": 0 }
+        }
+      },
+      "else": { "required": ["ref", "event"], "properties": { "changedFields": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "event.cancelled" } } },
+      "then": { "required": ["reason"], "properties": { "reason": { "const": "provider_cancelled_or_removed" } } },
+      "else": {
+        "if": { "properties": { "type": { "not": { "const": "connection.gap" } } } },
+        "then": { "properties": { "reason": false } }
+      }
+    }
+  ],
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["calendarId", "eventId"],
+      "additionalProperties": false,
+      "properties": {
+        "calendarId": { "type": "string", "pattern": "^[A-Za-z0-9_@.+#-]{1,512}$" },
+        "eventId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,1024}$" }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [{ "required": ["date"] }, { "required": ["dateTime"] }],
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "dateTime": { "type": "string", "format": "date-time" },
+        "timeZone": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["ref", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": { "$ref": "#/$defs/ref" },
+        "status": { "enum": ["confirmed", "tentative", "cancelled"] },
+        "version": { "type": "string", "minLength": 3, "maxLength": 258 },
+        "title": { "type": "string", "maxLength": 8192 },
+        "location": { "type": "string", "maxLength": 8192 },
+        "start": { "$ref": "#/$defs/time" },
+        "end": { "$ref": "#/$defs/time" },
+        "myResponse": { "enum": ["needsAction", "accepted", "tentative", "declined"] },
+        "recurringEventId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,1024}$" },
+        "originalStartTime": { "$ref": "#/$defs/time" }
+      }
+    }
+  }
+}

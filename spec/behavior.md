@@ -1,47 +1,53 @@
 # Behavior
 
-Status: draft. This document defines behavior shared by both SDKs and the hosted service.
+## Authorization and synchronization
 
-## Google synchronization
+1. A project session starts a 15-minute Google Web OAuth exchange with account selection, offline access and PKCE. The server stores a digest of random state with the originating subject and claims it atomically before exchanging the code. Both success and provider rejection consume the state. Session status is visible only to the originating subject. Google must return an offline credential and an owned primary calendar. The service binds that calendar to the initiating subject on first consent. Subsequent consent can renew the same connection. Disconnecting releases the binding so the subject can connect another calendar.
+2. The first successful full list establishes a queryable baseline without historical notifications. The service registers a pending channel before calling `events.watch` and schedules an incremental pass after registration to cover changes during setup. The worker requests a 24-hour watch and renews before Google's reported expiry. Old channels remain valid until expiry and can overlap with the replacement.
+3. A valid webhook advances a durable work revision. The server checks the channel ID, verification value, provider resource ID once known, expiry and increasing message number. Before registration returns, only the authenticated initial `sync` message is accepted. Callbacks only trigger a read and never supply event contents. Work that arrives during a read remains pending for a later pass.
+4. A PostgreSQL advisory lock serializes synchronization, writes, reconnect and disconnect per connection. The snapshot, outbox and new Google sync token commit together after all pages succeed. Periodic incremental reads cover dropped pushes. A Google `410` triggers a full read, a durable `connection.gap` and comparison with the previous snapshot. The rebuild removes missing copies from the snapshot. Only explicit Google tombstones generate cancellation notifications.
+5. A revoked offline grant or permanent loss of access marks the connection `auth_required`. Reauthorization retains the checkpoint and restarts catch-up. Disconnect clears local Google authorization and snapshots, revokes consumer access and attempts to stop known watches. Any remaining channels expire at Google.
 
-1. Create one Google event watch per monitored connection and calendar. Associate the pending channel with its connection before registering it so an early Google sync notification can be handled. Validate incoming notifications against the registered channel and its verification value, and check the provider resource identifier once known.
-2. Establish the initial calendar state as a baseline. Use a reconciliation pass after registering the watch to cover changes during setup. The initial baseline is queryable without emitting historical invitations as new.
-3. Treat a Google callback as a sync trigger. Run at most one incremental sync at a time per connection and calendar. Coalesce repeated triggers and run another pass when changes arrive during a sync. Save the new cursor only after fetching the last page and committing the corresponding snapshot and notifications. Serialize writes to that calendar's synchronization state.
-4. Renew channels before the reported expiration. Old and new channels can overlap. Perform periodic catch-up syncs because upstream notifications can be dropped. On Google `410 Gone`, rebuild the baseline and reconcile changes. Report a gap when earlier transitions cannot be reconstructed. A permission change or incomplete sync must not produce fabricated cancellations.
-5. When Google authorization expires or is revoked and cannot be refreshed, mark the connection as requiring authorization. A disconnect stops scheduling, revokes SDK access and stops upstream watches where possible.
+Google exposes the latest revisions observable through list operations. Multiple upstream edits between reads can be coalesced. Calendar settings control which invitations appear on the primary calendar. The worker uses Google's expanded recurring-instance results and keeps the same query parameters across full and incremental reads. [Google push notifications](https://developers.google.com/workspace/calendar/api/guides/push) · [Incremental sync](https://developers.google.com/workspace/calendar/api/guides/sync) · [Invitation visibility](https://developers.google.com/workspace/calendar/api/concepts/inviting-attendees-to-events)
 
-Google Webhooks do not identify changed meetings or include their contents. The service delivers observed differences between syncs. Several Google writes can therefore appear as one change. [Google push notifications](https://developers.google.com/workspace/calendar/api/guides/push) · [Incremental sync](https://developers.google.com/workspace/calendar/api/guides/sync)
+The service records the first onboarding milestones from account binding through the initial Watch and first accepted webhook. First-attempt starts survive provider retries, and later incremental reads, Watch renewals, and reauthorization of an existing connection preserve the sample. Relinking a disconnected connection starts a new sample. The migration leaves older samples unavailable. Milestones contain timestamps and durations only.
 
 ## Notification classification
 
 | Type | Observed transition |
 | --- | --- |
 | `invitation.received` | A newly observed event from another organizer includes the linked user as a guest with a pending response |
-| `event.created` | A new event that does not match the pending-invitation rule |
-| `event.updated` | Meeting details changed, such as title, time, or location |
-| `event.cancelled` | Google reports a cancellation or a removed event copy; the reason distinguishes these when known |
-| `event.rsvp_changed` | Only the linked user's response changed among the tracked fields |
+| `event.created` | Another newly observed event |
+| `event.updated` | One or more tracked details change, such as title, time or location |
+| `event.cancelled` | Google reports a tombstone for a previously observed live event. The reason is `provider_cancelled_or_removed` because the event copy alone can be ambiguous |
+| `event.rsvp_changed` | The linked user's response is the only tracked field to change |
+| `connection.gap` | Google invalidates its sync token and a full reconciliation succeeds. The reason is `provider_cursor_expired` |
 
-Emit one primary type for an observed revision. A new pending invitation uses `invitation.received` instead of `event.created`. When meeting details and RSVP change together, `event.updated` includes both changes. A cancellation may carry a tombstone. Losing a calendar permission is a connection or calendar status change. A removed local event copy alone does not prove the organizer cancelled the meeting for everyone.
-
-Notification IDs are stable across delivery retries and separate from resource IDs. Source data such as titles and descriptions is untrusted content. Logs and status endpoints carry operational metadata and do not include event bodies.
+One observed revision emits one primary calendar notification. If details and RSVP change together, `event.updated` carries both changed fields. Provider content such as titles and locations must be rendered as text by consumers.
 
 ## Delivery
 
-- Each consumer has an independent server checkpoint and one active reader. The SDK reconnects with backoff and resumes after the last acknowledged cursor.
-- Deliver in queue order within the consumer. The SDK runs matching handlers and acknowledges the contiguous processed prefix only after all matching handlers return successfully. If processing fails, leave the failed item unacknowledged and retry with backoff. Callers should use `notificationId` to deduplicate side effects.
-- Advance checkpoints monotonically. Repeat acknowledgements are safe. Reject a cursor issued to a different consumer or beyond that reader's delivered batch.
-- Deliver at least once while a notification remains in the service's configured retention window and the reader remains authorized. If a checkpoint falls outside retention, report `CURSOR_EXPIRED` and surface a `connection.gap` event. The caller can establish a fresh consumer position, query the latest state and resume; old transitions may be unavailable.
-- Expose `connection.ready`, `connection.reconnecting`, `connection.gap` and `auth.required` separately from calendar notifications. A consumer can stop without disconnecting its Google account.
+- Each consumer has an independent server checkpoint and at most one active reader. Both SDKs open an authenticated SSE stream. After validating the reader and checkpoint, the server sends `ready` and ordered notices after the last ACK. PostgreSQL signals wake the stream after the outbox or checkpoint transaction commits. Idle heartbeats also recheck the durable state for missed signals and revoked access. The legacy long-poll endpoint uses the same checkpoint.
+- The server keeps at most one batch of up to 25 notices in flight. The SDK processes items in order and acknowledges each item after every matching handler succeeds. A handler failure leaves the item pending and backs off. The SDK remembers up to 1,024 successful notification IDs in process so a lost acknowledgment can be retried without invoking handlers again. Delivery remains at least once across process restarts. Callers can persist `notificationId` alongside application side effects.
+- Checkpoints advance monotonically. The service signs cursors issued with a batch and binds each to the consumer. Acknowledging a cursor asserts that the prefix through that item was processed. Duplicate acknowledgments are safe.
+- When retention overtakes a consumer, delivery reports `CURSOR_EXPIRED`. The SDK emits a local `connection.gap` with reason `cursor_expired` and stops. Pair a fresh consumer and query the latest snapshot to resume. A durable provider gap is delivered and acknowledged like other notifications.
+- Network failures, throttling, server failures and handler failures reconnect with exponential backoff or the server retry hint. The listener emits `connection.ready` and `connection.reconnecting` as lifecycle events. Terminal auth failures surface as `auth.required`. Other terminal protocol failures surface as `connection.error`.
+- For delivery diagnostics, the outbox records how many validated Google callbacks were pending when sync started and how many arrived before that sync committed its batch. Only a single pending callback with no additional arrivals can supply the batch's webhook timestamp. An expired provider cursor does not produce a timing association. These diagnostics follow the outbox retention period and leave the notification envelope unchanged.
 
-## Writes and permissions
+## RSVP
 
-- Offer separate capabilities for reading events, writing events and managing calendar metadata. Request the narrowest applicable Google scope. Check the connection owner's role and the SDK grant for the requested calendar and operation. Secondary calendars are owned by the authorized Google user.
-- RSVP targets the linked account's attendee record on its copy of the event. Identify that attendee from Google data, validate the response, and use Google's participant-only update semantics. The request cannot supply another attendee identity. Preserve the rest of the guest list. Return the confirmed response and let the normal sync path produce any notification. [Google event resource](https://developers.google.com/workspace/calendar/api/v3/reference/events)
-- Validate dates and times, time zones, sizes, enumerations, and fields before sending updates. Require an explicit guest notification policy for changes affecting guests. Use conditional updates when a version is provided and surface conflicts to the caller.
-- Deduplicate create attempts by project, connection, operation and idempotency key. Reusing a key with a different body is a conflict. If the upstream result is ambiguous, reconcile where possible and return `OUTCOME_UNKNOWN` otherwise. The SDK must not automatically issue a new create with a fresh key.
-- Cancellation is scoped to an explicit event reference and requires permission to cancel it. A guest declines through RSVP. Expose a changed or cancelled event to listeners through the same synchronization path used for edits made in Google Calendar. [Google Calendar scopes](https://developers.google.com/workspace/calendar/api/auth) · [Conditional updates](https://developers.google.com/workspace/calendar/api/guides/version-resources)
+The caller supplies an event reference and desired response. The service reads the event from the connection's authorized primary calendar, locates the single attendee marked `self`, and rejects organizer events, resource attendees and recurrence masters. The provider write is conditional on the ETag just read. A supplied `If-Match` must also match. The patch uses `attendeesOmitted: true` and the self attendee's response, without sending general guest update emails. The result reflects the state confirmed by Google. If confirmation is unavailable after the write was attempted, the API returns `OUTCOME_UNKNOWN`. Writes use the normal sync path for notifications. [Google event resource](https://developers.google.com/workspace/calendar/api/v3/reference/events) · [Conditional updates](https://developers.google.com/workspace/calendar/api/guides/version-resources)
 
-## Conformance plan
+## Event creation
 
-Both SDKs will use the same fixtures for event decoding, callback ordering, failed handlers, resume, duplicate delivery, and expired cursors. Service tests will use a fake Google provider to exercise overlapping watches, partial sync failures, concurrent changes, cross-tenant authorization, RSVP isolation, and ambiguous writes.
+An enabled project subject can pair a consumer with create permission. A create targets the bound primary calendar after the baseline is established. Before calling Google, the service persists the request fingerprint and a generated Google event ID for the connection and idempotency key. A retry first checks that ID at Google. A conflict or uncertain insert response is reconciled against the ID and a private marker. The API returns the Google event snapshot, while the normal incremental sync publishes `event.created` through the outbox. [Google event insertion](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)
+
+## Event updates and cancellation
+
+An enabled project subject can pair a consumer with management permission. The service fetches the event from the bound primary calendar and verifies that the linked account organizes a timed, standalone event. It checks the requested version and passes it to Google on the patch or deletion. Google-confirmed changes reach the SSE outbox through incremental sync. If callers need to observe both an update and a subsequent cancellation, they can wait for `event.updated` before cancelling. [Google conditional modifications](https://developers.google.com/workspace/calendar/api/guides/version-resources)
+
+Guest writes require an additional grant and an explicit notification policy, even when suppressing notifications. The service forwards that policy to Google and checks the current guest list before managing an existing event. It rejects resource attendees and incomplete attendee lists. Creation includes the normalized guest list and policy in the idempotency fingerprint. The API and SSE event snapshots contain no guest email list. Each guest's connected calendar observes its own Google event copy and gets its own notification sequence.
+
+## Verification
+
+The service uses a simulated Google HTTP server with a private PostgreSQL test cluster. Both SDKs use the same [HTTP and notification fixtures](fixtures/mvp.json). The service integration test validates delivered notifications against the [schema](schema/notification.schema.json). Live Google acceptance is a separate test-project exercise.

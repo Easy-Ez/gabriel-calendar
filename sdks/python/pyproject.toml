@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gabriel-calendar"
+version = "0.1.0"
+description = "Async SDK for the Gabriel Calendar service"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["httpx>=0.28.1,<0.29"]
+
+[project.urls]
+Repository = "https://github.com/Easy-Ez/gabriel-calendar"
+Documentation = "https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md"
+Issues = "https://github.com/Easy-Ez/gabriel-calendar/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+gabriel_calendar = ["py.typed"]
