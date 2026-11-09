@@ -8,7 +8,7 @@ Run `bash scripts/package-sdks.sh` after installing workspace dependencies. It b
 
 Manually run the [npm workflow](.github/workflows/publish-npm.yml) to rehearse the release with `npm publish --dry-run`. To release, push a `node-v<version>` tag on a commit from `main`. The tag must match `sdks/node/package.json`. GitHub Actions uploads the verified tarball to npm using Trusted Publishing. The `gabriel-calendar` npm package must trust `Easy-Ez/gabriel-calendar`, workflow `publish-npm.yml`, environment `npm`, with direct publishing allowed. npm expires a new binding if it does not complete a successful publish within two days.
 
-The manually dispatched [PyPI workflow](.github/workflows/publish-pypi.yml) runs the package checks before publishing its verified Python artifacts with Trusted Publishing.
+Manually run the [PyPI workflow](.github/workflows/publish-pypi.yml) to build, install, and validate the Python distributions without uploading them. To release, push a `python-v<version>` tag on a commit from `main`. The tag must match `sdks/python/pyproject.toml`. GitHub Actions publishes the verified wheel and source distribution through the existing PyPI Trusted Publisher for `publish-pypi.yml` in the `pypi` environment.
 
 ## Public repository boundary
 
