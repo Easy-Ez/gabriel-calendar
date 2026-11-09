@@ -2,13 +2,15 @@
 
 An async client for the Gabriel Calendar service. It connects a Google Calendar account, streams changes to the linked primary calendar over SSE, and supports pending invitations, RSVP, and single-event writes.
 
-## Install
+## Quick start
+
+Use Python 3.11 or later. If your team hosts Gabriel Calendar, ask the operator for the HTTPS base URL and your own project session. The operator needs to add your account to the Google OAuth test users if the app is External / Testing. Supply the URL as `GABRIEL_BASE_URL` and inject the session as `GABRIEL_PROJECT_SESSION` from your application's secret store.
 
 ```bash
 python -m pip install gabriel-calendar
 ```
 
-Requires Python 3.11 or later, a Gabriel Calendar service URL, and a project session supplied by the service operator. Load the session from your application's secret store and pass it through `get_project_credential`.
+Save this as `listen.py` and run `python listen.py`. On the first run, choose your approved Google account in the browser and allow access. For a custom browser launcher, pass an `open_browser` callback to `connect()`.
 
 ```python
 import asyncio
@@ -19,7 +21,7 @@ from gabriel_calendar import CalendarClient
 
 async def main():
     client = await CalendarClient.connect(
-        base_url="https://calendar.example.invalid",
+        base_url=os.environ["GABRIEL_BASE_URL"],
         get_project_credential=lambda: os.environ["GABRIEL_PROJECT_SESSION"],
     )
 
@@ -28,15 +30,39 @@ async def main():
         print(notice.type)
 
     async with client:
-        page = await client.events.list_invitations()
-        print("Pending invitations", len(page.events))
+        print("Listening for new invitations. Press Ctrl+C to stop.")
+        await asyncio.Event().wait()
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except KeyboardInterrupt:
+    pass
 ```
 
-`connect()` opens the Google consent page and pairs a consumer. Use `save_grant` to store its connection ID, consumer ID, and credential in a secret store. Construct a new `CalendarClient` with those IDs and a `get_credential` callback to resume delivery in another process. Notifications are acknowledged after the registered handlers succeed. Use `notification_id` to make handler side effects idempotent across restarts.
+The first sync establishes the baseline. New invitations arrive over SSE. Use `await client.events.list_invitations()` to query existing pending invitations after the initial sync. If the server returns `SYNC_PENDING`, retry after that sync completes.
 
-Request `can_rsvp`, `can_create`, or `can_manage` when pairing a writer. For a guest event, also request `can_invite` and set `notify_guests` explicitly on each write. Creation takes an idempotency key, and updates and cancellations take the current event version.
+## Resume a connection
 
-[SDK and HTTP contract](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md) · [Service setup](https://github.com/Easy-Ez/gabriel-calendar/blob/main/docs/zh-CN/testing.md)
+Pass a `save_grant` callback to `connect()` to store the returned grant's `connection_id`, `consumer_id` and `credential` in your application's secret store. In later runs, load the same grant and use the constructor in place of `connect()`.
+
+```python
+import os
+
+from gabriel_calendar import CalendarClient
+
+client = CalendarClient(
+    base_url=os.environ["GABRIEL_BASE_URL"],
+    connection_id=os.environ["GABRIEL_CONNECTION_ID"],
+    consumer_id=os.environ["GABRIEL_CONSUMER_ID"],
+    get_credential=lambda: os.environ["GABRIEL_CONSUMER_CREDENTIAL"],
+)
+```
+
+Register handlers and enter `async with client` as above. The SDK acknowledges notifications after the registered handlers succeed. Use `notification_id` to make handler side effects idempotent across restarts.
+
+## Client API
+
+Ask the service operator to enable writes you need, then request `can_rsvp`, `can_create`, or `can_manage` when pairing the consumer. For a guest event, also request `can_invite` and set `notify_guests` explicitly on each write. Creation takes an idempotency key, and updates and cancellations take the current event version.
+
+[SDK method reference](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-surface) · [Client examples](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-examples) · [Service operator setup](https://github.com/Easy-Ez/gabriel-calendar/blob/main/docs/zh-CN/testing.md)
