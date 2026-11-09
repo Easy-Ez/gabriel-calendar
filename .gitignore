@@ -1,0 +1,34 @@
+# Local-only configuration and operational files
+.env
+.env.*
+*.local
+.private/
+private/
+local/
+deploy/private/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+id_ecdsa
+credentials*
+secrets.*
+*.log
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+.DS_Store
+
+# SDK and service build output
+node_modules/
+dist/
+build/
+coverage/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
