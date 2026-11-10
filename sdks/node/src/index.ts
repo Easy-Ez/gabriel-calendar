@@ -20,7 +20,7 @@ export interface ClientOptions {
 export interface Grant { connectionId: string; consumerId: string; credential: string }
 export interface ConnectOptions {
   baseUrl: string;
-  getProjectCredential: Credential;
+  token: string;
   openBrowser?: (url: string) => void | Promise<void>;
   saveGrant?: (grant: Grant) => void | Promise<void>;
   signal?: AbortSignal;
@@ -225,27 +225,27 @@ export class CalendarClient {
 
   static async connect(options: ConnectOptions): Promise<CalendarClient> {
     const base = validatedUrl(options.baseUrl, true).origin;
-    requireValid(typeof options.getProjectCredential === "function", "INVALID_ARGUMENT");
+    requireValid(matches(options.token, credentialPattern), "INVALID_ARGUMENT");
     const timeout = AbortSignal.timeout(15 * 60_000);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    const project = options.getProjectCredential;
-    const session = object(await request(base, "/v1/connect-sessions", project, { method: "POST", signal }));
-    requireValid(matches(session.sessionId, uuid) && typeof session.authorizationUrl === "string");
+    const session = object(await request(base, "/v1/connect-sessions", () => options.token, { method: "POST", signal }));
+    requireValid(matches(session.sessionId, uuid) && matches(session.sessionCredential, credentialPattern) &&
+      typeof session.authorizationUrl === "string");
+    const credential = session.sessionCredential;
+    const path = `/v1/connect-sessions/${session.sessionId}`;
     await (options.openBrowser ?? openDefault)(validatedUrl(session.authorizationUrl).href);
     while (!signal.aborted) {
-      const result = object(await request(base, `/v1/connect-sessions/${session.sessionId}`, project, { signal }));
+      const result = object(await request(base, path, () => credential, { signal }));
       if (result.status === "failed") throw new CalendarError("CONSENT_FAILED");
       if (result.status === "connected") {
         requireValid(matches(result.connectionId, uuid));
         const id = result.connectionId;
-        const grant = object(await request(base, `/v1/connections/${id}/consumers`, project, {
-          method: "POST", body: {}, signal,
-        }));
+        const grant = object(await request(base, `${path}/consumer`, () => credential, { method: "POST", signal }));
         requireValid(grant.connectionId === id && matches(grant.consumerId, uuid) && matches(grant.credential, credentialPattern));
-        const credential = grant.credential;
-        await options.saveGrant?.({ connectionId: id, consumerId: grant.consumerId, credential });
+        const consumerCredential = grant.credential;
+        await options.saveGrant?.({ connectionId: id, consumerId: grant.consumerId, credential: consumerCredential });
         return new CalendarClient({ baseUrl: base, connectionId: id, consumerId: grant.consumerId,
-          getCredential: () => credential });
+          getCredential: () => consumerCredential });
       }
       requireValid(result.status === "pending");
       await delay(1000, undefined, { signal }).catch(() => {});

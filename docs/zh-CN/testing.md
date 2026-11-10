@@ -10,11 +10,11 @@
 | 服务通过 `events.watch` 向 Google 注册的 Webhook | `https://calendar.example.invalid/v1/google/webhook` |
 | 服务健康检查 | `https://calendar.example.invalid/healthz` |
 
-Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使用 `calendar.calendarlist.readonly` 和 `calendar.events.owned`，并请求离线授权。Google 对 External / Testing 应用签发的 Calendar refresh token 通常在七天后到期，届时可为同一个连接重新授权。 [Google Web OAuth](https://developers.google.com/identity/protocols/oauth2/web-server) · [授权有效期](https://developers.google.com/identity/protocols/oauth2#expiration) · [Google Calendar Webhook](https://developers.google.com/workspace/calendar/api/guides/push)
+Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使用 `openid`、`calendar.calendarlist.readonly` 和 `calendar.events.owned`，并请求离线授权。服务通过 Google UserInfo 取得稳定的账号 `sub`，再绑定该账号拥有的主日历。Google 对 External / Testing 应用签发的 Calendar refresh token 通常在七天后到期，届时可为同一个连接重新授权。 [Google Web OAuth](https://developers.google.com/identity/protocols/oauth2/web-server) · [OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect) · [授权有效期](https://developers.google.com/identity/protocols/oauth2#expiration) · [Google Calendar Webhook](https://developers.google.com/workspace/calendar/api/guides/push)
 
 ## 运行时配置
 
-在部署环境由批准的密钥管理系统注入私有值。使用专用 PostgreSQL 数据库和受控访问的备份。应用把 Google refresh token 加密存入数据库，把项目会话、SDK grant 和 Webhook 校验值的摘要用于验证。部署之间保持同一数据密钥，才能解密已有授权并验证已签发的投递游标。
+在部署环境由批准的密钥管理系统注入私有值。使用专用 PostgreSQL 数据库和受控访问的备份。应用加密保存 Google refresh token，使用接入码、授权会话凭据、SDK grant 和 Webhook 校验值的摘要进行验证。部署之间保持同一数据密钥，才能识别已绑定账号、解密授权并验证投递游标。
 
 | 环境变量 | 格式或默认值 |
 | --- | --- |
@@ -22,30 +22,25 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 | `PUBLIC_BASE_URL` | HTTPS origin，例如 `https://calendar.example.invalid` |
 | `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` | Web OAuth 客户端配置 |
 | `GABRIEL_DATA_KEY` | 32 个随机字节的无填充 base64url 编码，由密钥管理系统注入 |
-| `GABRIEL_PROJECT_SESSIONS` | JSON 对象。键是部署分配的应用用户标识，值是该用户的独立 bearer，会话值采用 32 个随机字节的无填充 base64url 编码 |
-| `GABRIEL_PROJECT_SESSION_DIGESTS` | 可选 JSON 对象，为额外的项目用户提供其 bearer 的 SHA-256 摘要，采用无填充 base64url。原始 bearer 由用户的密钥存储保管 |
+| `GABRIEL_ADMIN_TOKEN_DIGEST` | 管理员凭据字符串的 SHA-256 摘要，采用无填充 base64url。管理员凭据本身由密钥管理系统保存，格式为 32 个随机字节的无填充 base64url 编码 |
 | `HOST`、`PORT` | 默认 `127.0.0.1` 和 `8080` |
 | `GABRIEL_TICK_MS` | 工作循环间隔，默认 1,000 毫秒 |
 | `GABRIEL_CATCHUP_MS` | 定期增量补收间隔，默认 300,000 毫秒 |
 | `GABRIEL_RETENTION_MS` | 投递保留期，默认 604,800,000 毫秒 |
 
-## 人员与权限管理
+## 接入码与连接管理
 
-当前由部署管理员通过启动配置登记人员和项目凭据。获准用户授权主日历后，配对的客户端即可读写该日历，写入范围由事件归属和 Google 授权约束。
+1. 在服务的 HTTPS 地址打开 `/admin`。浏览器认证提示中，用户名填 `admin`，密码填密钥管理系统中与 `GABRIEL_ADMIN_TOKEN_DIGEST` 对应的管理员凭据。
+2. 点 **Create token**，把生成的共享接入码存入团队的密钥管理系统。管理页只在生成时显示原值。将 HTTPS 地址和接入码分发给同事。Google 项目仍处于 External / Testing 时，账号仍须加入 Google 测试用户名单。
+3. 同事把地址填入 SDK 的 `baseUrl` / `base_url`，将共享码传给 `token`，在 SDK 打开的 Google 页面用自己的账号授权。SDK 拿到独立的 consumer grant，之后读写和接收 SSE 都用这份凭据。
 
-### 开通一个同事
-
-1. 为同事分配一个稳定的项目用户 ID，例如 `pilot_01`。它是 Gabriel 用来绑定主日历的内部标识。项目仍处于 External / Testing 时，也要在 Google OAuth 的测试用户名单加入该同事的 Google 账号。
-2. 在批准的密钥管理系统中为该用户发放独立的项目凭据。服务端在 `GABRIEL_PROJECT_SESSION_DIGESTS` 中登记从项目用户 ID 到凭据摘要的映射。摘要是对**凭据字符串**计算 SHA-256 后得到的无填充 base64url 值。保留其他用户的配置，重启 Gabriel 服务后生效。
-3. 通过密钥管理系统将原始凭据注入同事的客户端。他调用 SDK `connect()` 并在 Google 页面授权，服务将他的主日历绑定到 `pilot_01`。SDK 配对后获得自己的 consumer grant，日常读写和 SSE 使用这份 grant。
-
-轮换项目凭据时保留用户 ID 并替换摘要。需要解除日历绑定并撤销已有 consumer grant 时，先由该用户的项目凭据调用[断开连接接口](../../spec/api.md#http-endpoints)，再从启动配置中移除该用户。
+点 **Reset token** 可轮换共享码。旧码和它发起的未完成会话立即失效，已领取的 consumer grant 继续工作。管理页显示连接 ID、脱敏日历、状态和最近同步时间。对某条连接点 **Disconnect** 会解除绑定、撤销该连接的所有 consumer grant 并尝试停止 Google Watch。持有当前接入码的账号可以重新授权。若接入码泄露，先重置，再断开任何需要撤销的连接。
 
 ### 写入范围与升级
 
 同一个 consumer 可以收通知、回复自己的邀请、创建单次会议，以及改期或取消自己组织的单次会议。创建、改期和取消带来宾的会议时，调用方须显式传 `notifyGuests` / `notify_guests`。例如，把自己组织的会议改到下午三点时，传 `true` 请求 Google 通知来宾，传 `false` 请求 Google 跳过通知。
 
-升级服务后，有效的旧 consumer grant 也能写入。上线前核对已登记用户和分发出去的凭据，尤其是此前只用于监听的客户端。旧的 RSVP 开关、截止时间和各操作名单配置可以从部署中移除。配对接口现在接收空 JSON 对象 `{}`，客户端与服务端应一起升级。[配对与写入契约](../../spec/api.md#http-endpoints)
+升级时先运行数据库迁移，并同时更新服务端和 SDK。迁移保留已有日历连接及有效 consumer grant。旧流程建立的连接要改用共享码重新接入时，先在管理页解除旧绑定，再用同一个 Google 账号授权。部署可移除旧的逐人项目凭据配置。[HTTP 契约](../../spec/api.md#http-endpoints)
 
 ## 模拟验证与部署步骤
 
@@ -58,7 +53,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
    npm run test:python
    ```
 
-3. 审查下方代理示例，替换域名与证书路径后将实际配置放在部署环境。只登记已确认的测试用户，为测试项目注入上表配置，再构建、迁移和启动服务。
+3. 审查下方代理示例，替换域名与证书路径后将实际配置放在部署环境。为测试项目注入上表配置，再构建、迁移和启动服务。
 
    ```bash
    npm run build
@@ -66,7 +61,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
    npm start
    ```
 
-4. 验证公网 `GET /healthz` 返回 200。完成测试账号授权后，使用相应项目会话读取连接状态。确认 `lastSyncAt` 和 `watchExpiresAt` 非空，发出测试变更后确认 `lastWebhookAt` 推进。
+4. 验证公网 `GET /healthz` 返回 200。在 `/admin` 创建接入码，用已确认的测试账号完成授权后，使用该连接的 consumer grant 读取状态。确认 `lastSyncAt` 和 `watchExpiresAt` 非空，发出测试变更后确认 `lastWebhookAt` 推进。
 5. 在已确认的测试账号和日历上验证 RSVP。按下方验收步骤记录结果。日志与验收记录只保留请求 ID、操作、错误码和必要时间戳。
 6. 先启动 SSE，再用 SDK 创建无来宾的合成事件，比较创建响应和 `event.created` 的事件引用。用同一个幂等键重试，确认事件引用相同。
 7. 用事件当前版本改期，等待 SSE 收到 `event.updated` 并确认，然后用新版本取消并等待 `event.cancelled`。
@@ -125,6 +120,6 @@ server {
 2. A 在 Google Calendar 创建一场合成测试会议并邀请 B。确认 B 的主日历能看到该邀请，监听收到 `invitation.received`，待回复查询返回同一事件。
 3. B 用通知中的 `ref` 调用 `events.rsvp(ref, "tentative")`。确认响应的 `myResponse` 为 `tentative`，再在 A 的 Google Calendar 界面确认 B 的 Maybe 状态。
 4. A 改期并取消这场测试会议。分别确认 B 收到 `event.updated` 和 `event.cancelled`。验证离线补收时，可在改期前停止 B 的监听，改期后用同一个 consumer 恢复。
-5. 结束后用项目会话断开测试连接，验证对应 SDK grant 失效。
+5. 结束后在 `/admin` 断开测试连接，验证对应 SDK grant 失效。
 
 仓库的自动测试覆盖模拟 Google 与 PostgreSQL。真实 OAuth、Google 推送和 A/B 双方界面状态需单独记录验收结果。 [HTTP 契约](../../spec/api.md)

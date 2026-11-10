@@ -18,8 +18,7 @@ test("shared wire fixture decodes and rejects invalid envelopes", () => {
 });
 
 async function harness(t, steps) {
-  const project = credential();
-  const grant = credential();
+  const credentials = { enrollment: credential(), session: credential(), grant: credential() };
   const remaining = [...steps];
   let failure;
   const server = createServer((req, res) => {
@@ -28,7 +27,7 @@ async function harness(t, steps) {
       assert(step, "unexpected HTTP request");
       assert.equal(req.url, step.path);
       assert.equal(req.method, step.method);
-      assert(req.headers.authorization === "Bearer " + (step.project ? project : grant));
+      assert(req.headers.authorization === "Bearer " + credentials[step.auth ?? "grant"]);
       assert.equal(req.headers["if-match"], step.ifMatch);
       assert.equal(req.headers["idempotency-key"], step.idempotencyKey);
       const chunks = [];
@@ -49,7 +48,8 @@ async function harness(t, steps) {
         return res.end();
       }
       res.setHeader("Content-Type", "application/json");
-      const payload = step.grant ? { ...step.payload, credential: grant } : step.payload;
+      const payload = step.issueSession ? { ...step.payload, sessionCredential: credentials.session } :
+        step.grant ? { ...step.payload, credential: credentials.grant } : step.payload;
       res.writeHead(step.status).end(JSON.stringify(payload));
     })().catch(error => {
       failure = error;
@@ -64,13 +64,13 @@ async function harness(t, steps) {
     assert.ifError(failure);
     assert.equal(remaining.length, 0);
   });
-  return { baseUrl: "http://127.0.0.1:" + server.address().port, project, grant };
+  return { baseUrl: "http://127.0.0.1:" + server.address().port, token: credentials.enrollment, grant: credentials.grant };
 }
 
 test("shared SSE lifecycle, failed handler, lost ack, reconnect, gaps and writes", { timeout: 8000 }, async t => {
-  const { baseUrl, project, grant } = await harness(t, fixture.steps);
+  const { baseUrl, token, grant } = await harness(t, fixture.steps);
   const client = await CalendarClient.connect({
-    baseUrl, getProjectCredential: () => project,
+    baseUrl, token,
     openBrowser: url => assert.equal(url, "https://consent.example.invalid/authorize"),
     saveGrant: saved => assert(saved.credential === grant),
   });

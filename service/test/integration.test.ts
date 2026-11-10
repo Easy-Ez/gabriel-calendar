@@ -41,12 +41,11 @@ async function listen(server: Server) {
 test("service CLI migrates and serves readiness", { skip: !process.env.GABRIEL_TEST_DATABASE_URL, timeout: 8000 }, async () => {
   const database = process.env.GABRIEL_TEST_DATABASE_URL!;
   const main = new URL("../src/main.js", import.meta.url);
-  const testSession = nonce();
+  const adminToken = nonce();
   const env = {
     ...process.env, DATABASE_URL: database, PUBLIC_BASE_URL: "https://calendar.example.invalid",
     GOOGLE_CLIENT_ID: "synthetic-web-client", GOOGLE_CLIENT_SECRET: nonce(), GABRIEL_DATA_KEY: nonce(),
-    GABRIEL_PROJECT_SESSIONS: JSON.stringify({ guest: nonce() }),
-    GABRIEL_PROJECT_SESSION_DIGESTS: JSON.stringify({ visitor: digest(testSession) }),
+    GABRIEL_ADMIN_TOKEN_DIGEST: digest(adminToken),
     HOST: "127.0.0.1",
   };
   const args = [decodeURIComponent(main.pathname)];
@@ -75,10 +74,11 @@ test("service CLI migrates and serves readiness", { skip: !process.env.GABRIEL_T
     }
     assert.equal(healthy?.status, 200);
     assert.deepEqual(await healthy?.json(), { status: "ok" });
-    const session = await fetch(base + "/v1/connect-sessions", {
-      method: "POST", headers: { Authorization: "Bearer " + testSession },
+    const dashboard = await fetch(base + "/admin", {
+      headers: { Authorization: "Basic " + Buffer.from(`admin:${adminToken}`).toString("base64") },
     });
-    assert.equal(session.status, 201);
+    assert.equal(dashboard.status, 200);
+    assert.match(await dashboard.text(), /No enrollment token has been created/);
   } finally {
     child.kill("SIGTERM");
     assert.equal((await exited)[0], 0);
@@ -93,24 +93,25 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
 
   const pool = new pg.Pool({ connectionString: process.env.GABRIEL_TEST_DATABASE_URL });
   let stopDelivery = () => {};
+  let stopServer = () => {};
   t.after(() => {
+    stopServer();
     stopDelivery();
     return pool.end();
   });
   await migrate(pool);
   await migrate(pool);
 
-  const owner = nonce();
-  const outsider = nonce();
-  const visitor = nonce();
+  const adminToken = nonce();
+  const organizerSubject = "synthetic-organizer";
+  let authorizedSubject = organizerSubject;
   const visitorCalendar = "visitor@example.invalid";
   const access = nonce();
   const refresh = nonce();
   const code = nonce();
   const config: Settings = {
     baseUrl: "https://calendar.example.invalid", googleClientId: "synthetic-web-client", googleClientSecret: nonce(),
-    dataKey: randomBytes(32), projectSessions: new Map([[digest(owner), "guest"], [digest(outsider), "other"],
-      [digest(visitor), "visitor"]]),
+    dataKey: randomBytes(32), adminTokenDigest: digest(adminToken),
     tickMs: 5, catchupMs: 10_000, retentionMs: 60_000, renewLeadMs: 60_000,
   };
   const live = new Map([["baseline", invited("baseline")]]);
@@ -177,6 +178,7 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
         return send({ access_token: access, expires_in: 20 });
       }
       assert(req.headers.authorization === "Bearer " + access);
+      if (path === "/userinfo") return send({ sub: authorizedSubject });
       if (path === "/users/me/calendarList/primary") {
         return send({ id: authorizedCalendar, accessRole: primaryOwner ? "owner" : "reader", primary: true });
       }
@@ -314,14 +316,15 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   });
   const provider = await listen(fake);
   t.after(() => { fake.close(); fake.closeAllConnections(); });
-  const google = new Google(config, { auth: provider + "/authorize", token: provider + "/token", calendar: provider });
+  const google = new Google(config, { auth: provider + "/authorize", token: provider + "/token", calendar: provider,
+    userinfo: provider + "/userinfo" });
   let service = new CalendarService(pool, config, google);
   const serving = service;
   await serving.startDelivery();
   stopDelivery = () => serving.stopDelivery();
   const server = httpServer(serving);
   base = await listen(server);
-  t.after(() => { server.close(); server.closeAllConnections(); });
+  stopServer = () => { server.close(); server.closeAllConnections(); };
 
   function push(watch: typeof watchRecords[number], message: number, state = "exists") {
     return fetch(base + webhookPath, { method: "POST", headers: {
@@ -335,6 +338,21 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
       method, headers: { Authorization: "Bearer " + credential, "Content-Type": "application/json", ...headers },
       body: body && JSON.stringify(body),
     });
+  }
+
+  function admin(path: string, method = "GET", origin = config.baseUrl, credential = adminToken) {
+    return fetch(base + path, { method, redirect: "manual", headers: {
+      Authorization: "Basic " + Buffer.from(`admin:${credential}`).toString("base64"), Origin: origin,
+    } });
+  }
+
+  async function rotate() {
+    const response = await admin("/admin/token/rotate", "POST");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const match = /<code>([A-Za-z0-9_-]{43})<\/code>/.exec(await response.text());
+    assert(match, "admin can copy the generated token once");
+    return match[1]!;
   }
 
   async function json(response: Response, status = 200): Promise<any> {
@@ -352,39 +370,63 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
     return json(response, status);
   }
 
-  async function begin(credential: string) {
-    const { sessionId, authorizationUrl } = await json(await request("/v1/connect-sessions", credential, "POST"), 201);
+  let teamToken = await rotate();
+  assert.equal((await fetch(base + "/admin")).status, 401);
+  assert.equal((await admin("/admin", "GET", config.baseUrl, teamToken)).status, 401);
+  assert.equal((await admin("/admin/token/rotate", "POST", "https://untrusted.example.invalid")).status, 403);
+  assert(!(await (await admin("/admin")).text()).includes(teamToken));
+
+  async function begin() {
+    const { sessionId, authorizationUrl, sessionCredential } =
+      await json(await request("/v1/connect-sessions", teamToken, "POST"), 201);
     const auth = new URL(authorizationUrl);
     assert.equal(auth.searchParams.get("access_type"), "offline");
     assert.equal(auth.searchParams.get("prompt"), "select_account consent");
     assert.equal(auth.searchParams.get("code_challenge_method"), "S256");
+    assert(auth.searchParams.get("scope")?.split(" ").includes("openid"));
     oauthChallenge = auth.searchParams.get("code_challenge")!;
-    return { path: "/v1/connect-sessions/" + sessionId, callback: base + callbackPath + "?" +
+    return { credential: sessionCredential as string, path: "/v1/connect-sessions/" + sessionId, callback: base + callbackPath + "?" +
       new URLSearchParams({ code, state: auth.searchParams.get("state")! }) };
   }
 
-  const denied = await begin(owner);
+  async function enroll() {
+    const session = await begin();
+    assert.equal((await fetch(session.callback)).status, 200);
+    return json(await request(session.path + "/consumer", session.credential, "POST"), 201);
+  }
+
+  const abandoned = await begin();
+  const oldToken = teamToken;
+  teamToken = await rotate();
+  assert(oldToken !== teamToken);
+  assert.equal((await request("/v1/connect-sessions", oldToken, "POST")).status, 401);
+  assert.equal((await request(abandoned.path, abandoned.credential)).status, 404);
+  assert.equal((await fetch(abandoned.callback)).status, 400);
+
+  const denied = await begin();
   const deniedUrl = new URL(denied.callback);
   deniedUrl.searchParams.delete("code");
   deniedUrl.searchParams.set("error", "access_denied");
   assert.equal((await json(await fetch(deniedUrl), 403)).error.code, "OAUTH_CONSENT_DENIED");
   assert.equal((await fetch(denied.callback)).status, 400);
-  assert.equal((await json(await request(denied.path, owner))).oauth.phase, "failed");
+  assert.equal((await json(await request(denied.path, denied.credential))).oauth.phase, "failed");
   grantRefresh = false;
-  assert.equal((await json(await fetch((await begin(owner)).callback), 403)).error.code, "OAUTH_OFFLINE_GRANT_MISSING");
+  assert.equal((await json(await fetch((await begin()).callback), 403)).error.code, "OAUTH_OFFLINE_GRANT_MISSING");
   grantRefresh = true;
   grantFullScope = false;
-  assert.equal((await json(await fetch((await begin(owner)).callback), 403)).error.code, "OAUTH_SCOPE_MISSING");
+  assert.equal((await json(await fetch((await begin()).callback), 403)).error.code, "OAUTH_SCOPE_MISSING");
   grantFullScope = true;
   primaryOwner = false;
-  assert.equal((await json(await fetch((await begin(owner)).callback), 403)).error.code, "OAUTH_PRIMARY_UNAVAILABLE");
+  assert.equal((await json(await fetch((await begin()).callback), 403)).error.code, "OAUTH_PRIMARY_UNAVAILABLE");
   primaryOwner = true;
-  const session = await begin(owner);
-  assert.equal((await request(session.path, outsider)).status, 404);
-  assert.deepEqual((await json(await request(session.path, owner))).oauth,
+  const session = await begin();
+  assert.equal((await request(session.path, teamToken)).status, 404);
+  assert.equal((await request(session.path, denied.credential)).status, 404);
+  assert.equal((await request(session.path + "/consumer", session.credential, "POST")).status, 404);
+  assert.deepEqual((await json(await request(session.path, session.credential))).oauth,
     { phase: "waiting_for_callback", durationMs: null });
   duringExchange = async () => {
-    const processing = await json(await request(session.path, owner));
+    const processing = await json(await request(session.path, session.credential));
     assert.equal(processing.status, "pending");
     assert.deepEqual(processing.oauth, { phase: "processing", durationMs: null });
     await delay(10);
@@ -393,26 +435,34 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   duringExchange = undefined;
   assert.deepEqual(callbacks.map(res => res.status).sort(), [200, 400]);
   assert.equal(exchanges, 4);
-  const { connectionId } = await json(await request(session.path, owner));
+  const { connectionId } = await json(await request(session.path, session.credential));
+  assert.equal((await request(session.path + "/consumer", teamToken, "POST")).status, 404);
+  assert.equal((await request(session.path + "/consumer", denied.credential, "POST")).status, 404);
+  const redemption = await Promise.all(Array.from({ length: 2 }, () =>
+    request(session.path + "/consumer", session.credential, "POST")));
+  assert.deepEqual(redemption.map(response => response.status).sort(), [201, 404]);
+  const reader = await json(redemption.find(response => response.status === 201)!, 201);
+  assert.equal(reader.connectionId, connectionId);
 
-  const duplicate = await begin(outsider);
+  authorizedSubject = "synthetic-visitor";
+  const duplicate = await begin();
   assert.equal((await json(await fetch(duplicate.callback), 403)).error.code, "OAUTH_PRIMARY_IN_USE");
-  assert.equal((await json(await request(duplicate.path, outsider))).status, "failed");
+  assert.equal((await json(await request(duplicate.path, duplicate.credential))).status, "failed");
+  authorizedSubject = organizerSubject;
   authorizedCalendar = "other@example.invalid";
-  const switched = await begin(owner);
+  const switched = await begin();
   assert.equal((await json(await fetch(switched.callback), 403)).error.code, "OAUTH_PRIMARY_MISMATCH");
-  assert.equal((await json(await request(switched.path, owner))).status, "failed");
+  assert.equal((await json(await request(switched.path, switched.credential))).status, "failed");
   authorizedCalendar = calendar;
   const path = "/v1/connections/" + connectionId;
-  assert.equal((await request(path, outsider)).status, 404);
-  const reader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
-  const secondReader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
+  assert.equal((await request(path, teamToken)).status, 401);
+  const secondReader = await enroll();
   const capabilities = ["events.read", "events.rsvp", "events.create", "events.update", "events.cancel"];
   assert.deepEqual((await json(await request(path, reader.credential))).capabilities, capabilities);
   assert.deepEqual((await json(await request(path, secondReader.credential))).capabilities, capabilities);
   const readerPath = path + "/consumers/" + reader.consumerId;
   const secondReaderPath = path + "/consumers/" + secondReader.consumerId;
-  const streamReader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
+  const streamReader = await enroll();
   const streamPath = path + "/consumers/" + streamReader.consumerId;
   async function openStream(readerEndpoint = streamPath, credential = streamReader.credential) {
     const stop = new AbortController();
@@ -469,11 +519,11 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   const invitations = path + "/calendars/primary/events?rsvp=needsAction";
   const rsvp = path + "/calendars/" + encodeURIComponent(calendar) + "/events/newinvite/rsvp";
   assert.equal((await request(invitations, reader.credential)).status, 409);
-  const setupState = async () => (await json(await request(path, owner))).onboarding;
+  const setupState = async () => (await json(await request(path, reader.credential))).onboarding;
   const bound = await setupState();
   assert.equal(bound.stage, "waiting_for_initial_sync");
   assert(bound.oauthCallbackMs >= 8);
-  assert.equal(bound.oauthCallbackMs, (await json(await request(session.path, owner))).oauth.durationMs);
+  assert.equal(bound.oauthCallbackMs, (await json(await request(session.path, session.credential))).oauth.durationMs);
   assert.equal(bound.initialSyncMs, null);
   duringBaseline = async () => {
     const initial = await setupState();
@@ -548,7 +598,7 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.equal((await ack(notice.cursor)).status, 204);
   assert.equal((await ack(notice.cursor)).status, 204);
   assert.deepEqual(await poll(), []);
-  assert.equal((await request(rsvp, owner, "PUT", { status: "tentative" })).status, 401);
+  assert.equal((await request(rsvp, teamToken, "PUT", { status: "tentative" })).status, 401);
   assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative", attendee: "other@example.invalid" })).status, 400);
   assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative" }, { "If-Match": '"stale"' })).status, 409);
   patchStatus = 503;
@@ -630,7 +680,7 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   const input = { title: "Synthetic SDK creation", start: "2030-01-03T12:00:00+08:00",
     end: "2030-01-03T12:15:00+08:00", showAs: "free" };
   const createHeaders = { "Idempotency-Key": "synthetic-key" };
-  assert.equal((await request(createPath, owner, "POST", input, createHeaders)).status, 401);
+  assert.equal((await request(createPath, teamToken, "POST", input, createHeaders)).status, 401);
   assert.equal((await request(createPath.replace("/primary/", "/other/"), reader.credential, "POST", input, createHeaders)).status, 404);
   assert.equal((await request(createPath, reader.credential, "POST", input)).status, 400);
   for (const invalid of [{ attendees: [] }, { recurrence: [] }, { start: "2030-02-30T12:00:00Z" },
@@ -722,23 +772,23 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   createStream.stop();
 
   authorizedCalendar = visitorCalendar;
-  const visitorSession = await begin(visitor);
-  assert.equal((await fetch(visitorSession.callback)).status, 200);
+  authorizedSubject = "synthetic-visitor";
+  const visitorReader = await enroll();
   authorizedCalendar = calendar;
-  const visitorId = (await json(await request(visitorSession.path, visitor))).connectionId;
-  const visitorConnection = "/v1/connections/" + visitorId;
-  const visitorReader = await json(await request(visitorConnection + "/consumers", visitor, "POST", {}), 201);
+  authorizedSubject = organizerSubject;
+  assert.notEqual(visitorReader.connectionId, connectionId);
+  const visitorConnection = "/v1/connections/" + visitorReader.connectionId;
   const visitorReaderPath = visitorConnection + "/consumers/" + visitorReader.consumerId;
   skipVisitorSyncPush = true;
   await service.tick();
   const visitorWatch = watchRecords.at(-1)!;
   assert.equal(watchRecords.length, 3);
-  const waiting = (await json(await request(visitorConnection, visitor))).onboarding;
+  const waiting = (await json(await request(visitorConnection, visitorReader.credential))).onboarding;
   assert.equal(waiting.stage, "waiting_for_webhook");
   assert.equal(waiting.firstWebhookMs, null);
   assert(waiting.watchRegistrationMs >= 0);
   assert.equal((await push(visitorWatch, 1, "sync")).status, 204);
-  const visitorTiming = (await json(await request(visitorConnection, visitor))).onboarding;
+  const visitorTiming = (await json(await request(visitorConnection, visitorReader.credential))).onboarding;
   assert.equal(visitorTiming.stage, "ready");
   assert(visitorTiming.firstWebhookMs >= visitorTiming.watchRegistrationMs);
   await service.tick();
@@ -828,20 +878,41 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   await service.tick();
   assert.equal((await request(readerPath + "/notifications", reader.credential)).status, 401);
   assert.equal((await request(createPath, reader.credential, "POST", input, createHeaders)).status, 401);
-  assert.equal((await json(await request(path, owner))).status, "auth_required");
+  assert.equal((await json(await request(path, reader.credential))).status, "auth_required");
 
   revoke = false;
-  const reconnect = await begin(owner);
+  const reconnect = await begin();
   assert.equal((await fetch(reconnect.callback)).status, 200);
-  assert.equal((await json(await request(reconnect.path, owner))).connectionId, connectionId);
+  assert.equal((await json(await request(reconnect.path, reconnect.credential))).connectionId, connectionId);
   assert.deepEqual(await setupState(), initialTiming);
   const remainingRsvp = path + "/calendars/" + encodeURIComponent(calendar) + "/events/anotherinvite/rsvp";
   for (const status of ["accepted", "declined"]) {
     assert.equal((await json(await request(remainingRsvp, reader.credential, "PUT", { status }))).myResponse, status);
   }
-  assert.equal((await request(path + "/disconnect", owner, "POST")).status, 204);
+  const rotating = await begin();
+  const previousToken = teamToken;
+  duringExchange = async () => { teamToken = await rotate(); };
+  assert.equal((await fetch(rotating.callback)).status, 401);
+  duringExchange = undefined;
+  assert(previousToken !== teamToken);
+  assert.equal((await request(reconnect.path + "/consumer", reconnect.credential, "POST")).status, 404);
+  assert.equal((await json(await request(path, reader.credential))).status, "active");
+  const unredeemed = await begin();
+  assert.equal((await fetch(unredeemed.callback)).status, 200);
+  const dashboard = await admin("/admin");
+  assert.equal(dashboard.status, 200);
+  const dashboardHtml = await dashboard.text();
+  assert(dashboardHtml.includes(connectionId) && dashboardHtml.includes(visitorReader.connectionId));
+  assert(!dashboardHtml.includes(calendar) && !dashboardHtml.includes(visitorCalendar) && !dashboardHtml.includes(teamToken));
+  const disconnect = `/admin/connections/${connectionId}/disconnect`;
+  assert.equal((await request(disconnect, reader.credential, "POST")).status, 401);
+  assert.equal((await admin(disconnect, "POST", "https://untrusted.example.invalid")).status, 403);
+  assert.equal((await admin(disconnect, "POST")).status, 303);
+  assert.equal((await request(unredeemed.path + "/consumer", unredeemed.credential, "POST")).status, 404);
   assert(stopped > 0);
   assert.equal((await request(readerPath + "/notifications", reader.credential)).status, 401);
-  assert.equal((await json(await request(path, owner))).status, "disconnected");
+  assert.equal((await request(path, reader.credential)).status, 401);
+  assert.equal((await json(await request(visitorConnection, visitorReader.credential))).status, "active");
+  assert((await (await admin("/admin")).text()).includes("disconnected"));
   assert.ifError(fakeError);
 });

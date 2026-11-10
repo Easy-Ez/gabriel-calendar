@@ -4,7 +4,7 @@ An ESM client for the Gabriel Calendar service. It connects a Google Calendar ac
 
 ## Quick start
 
-Use Node.js 22 or later. If your team hosts Gabriel Calendar, ask the operator for the HTTPS base URL and your own project session. The operator needs to add your account to the Google OAuth test users if the app is External / Testing. Supply the URL as `GABRIEL_BASE_URL` and inject the session as `GABRIEL_PROJECT_SESSION` from your application's secret store.
+Use Node.js 22 or later. Ask the operator for the HTTPS base URL and the team enrollment token. If the app is External / Testing, your account must be on the Google OAuth test-user list. Supply the URL as `GABRIEL_BASE_URL` and inject `GABRIEL_ENROLLMENT_TOKEN` from your application's secret store.
 
 ```bash
 npm install gabriel-calendar
@@ -17,7 +17,7 @@ import { CalendarClient } from "gabriel-calendar";
 
 const client = await CalendarClient.connect({
   baseUrl: process.env.GABRIEL_BASE_URL,
-  getProjectCredential: () => process.env.GABRIEL_PROJECT_SESSION,
+  token: process.env.GABRIEL_ENROLLMENT_TOKEN,
 });
 
 client.on("invitation.received", (notice) => {
@@ -56,7 +56,7 @@ Register handlers and call `start()` as above. The SDK acknowledges notification
 
 | What you want to do | Method |
 | --- | --- |
-| Authorize a Google account | `await CalendarClient.connect({ baseUrl, getProjectCredential, saveGrant })` |
+| Authorize a Google account | `await CalendarClient.connect({ baseUrl, token, saveGrant })` |
 | Attach to a saved consumer | `new CalendarClient({ baseUrl, connectionId, consumerId, getCredential })` |
 | Register a handler | `client.on(type, handler)` returns an unsubscribe function |
 | Start and stop SSE | `await client.start()` and `await client.stop()` |

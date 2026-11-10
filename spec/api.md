@@ -1,21 +1,20 @@
 # SDK and HTTP API
 
-The implemented MVP contract is version 1. One deployment serves one test project and watches the primary calendar of each approved Google account. Its project sessions have deployment-assigned subjects. On first OAuth consent, a **connection** binds the subject to the owned primary calendar returned by Google. A **consumer** is an independent durable reader with its own checkpoint and scoped bearer credential.
+One deployment serves one Google project and watches the primary calendar of each connected Google account. On OAuth consent, a **connection** binds the verified Google subject to its owned primary calendar. A **consumer** has an independent delivery checkpoint and scoped bearer credential.
 
 ## HTTP endpoints
 
-Use HTTPS and `Authorization: Bearer <credential>` on authenticated routes. Project sessions authorize OAuth, pairing and disconnect. A consumer grant for an active, admitted connection authorizes delivery, reads and the supported writes on its linked primary calendar. The service checks the connection and consumer binding. The `X-Request-Id` header accompanies every response, and responses use `Cache-Control: no-store`.
+Use HTTPS and `Authorization: Bearer <credential>` on SDK routes. The team token can start an authorization session. The session credential from that response is required to read the session and redeem it once after consent. The consumer credential authorizes delivery, reads and supported writes on its linked primary calendar. The `X-Request-Id` header accompanies every response, and responses use `Cache-Control: no-store`.
 
 | Method and path | Authorization | Success |
 | --- | --- | --- |
 | `GET /healthz` | Public | `200` with `{ "status": "ok" }` when the migrated database is reachable |
-| `POST /v1/connect-sessions` | Project session | `201` with `sessionId`, `authorizationUrl` and `expiresAt`. Empty request body |
-| `GET /v1/connect-sessions/{sessionId}` | Initiating project subject | `200` with `status` of `pending`, `connected` or `failed`, and `oauth` progress. A connected session includes `connectionId` |
+| `POST /v1/connect-sessions` | Team enrollment token | `201` with `sessionId`, `sessionCredential`, `authorizationUrl` and `expiresAt`. Empty request body |
+| `GET /v1/connect-sessions/{sessionId}` | Matching session credential | `200` with `status` of `pending`, `connected` or `failed`, and `oauth` progress. A connected session includes `connectionId` |
+| `POST /v1/connect-sessions/{sessionId}/consumer` | Matching session credential | `201` with `connectionId`, `consumerId` and `credential`. Empty request body. Only one redemption per completed session |
 | `GET /v1/google/oauth/callback` | One-time OAuth state and PKCE | `200` browser confirmation after linking. An expired or consumed state is rejected |
 | `POST /v1/google/webhook` | Google channel headers | `204` for well-formed notifications, including duplicates and unmatched channels |
-| `GET /v1/connections/{connectionId}` | Owner project session or bound consumer grant | `200` with `connectionId`, `status`, `watchedCalendars`, `lastSyncAt`, `lastWebhookAt`, `watchExpiresAt`, `capabilities` and `onboarding` |
-| `POST /v1/connections/{connectionId}/disconnect` | Owner project session | `204` after local revocation. Empty request body |
-| `POST /v1/connections/{connectionId}/consumers` | Owner project session | `201` with `connectionId`, `consumerId` and `credential`, returned once. Send an empty JSON object `{}` |
+| `GET /v1/connections/{connectionId}` | Bound consumer grant | `200` with `connectionId`, `status`, `watchedCalendars`, `lastSyncAt`, `lastWebhookAt`, `watchExpiresAt`, `capabilities` and `onboarding` |
 | `GET /v1/connections/{connectionId}/consumers/{consumerId}/stream` | Matching consumer grant | `200 text/event-stream`. The stream starts with `ready` and delivers ordered `notification` events |
 | `GET /v1/connections/{connectionId}/consumers/{consumerId}/notifications?wait=25` | Matching consumer grant | Legacy HTTP long poll. `200` with `{ "notifications": [] }` or up to 25 ordered notifications. `wait` accepts 0–25 seconds and defaults to 0 |
 | `POST /v1/connections/{connectionId}/consumers/{consumerId}/ack` | Matching consumer grant | `204` after advancing the contiguous processed prefix. The JSON body contains the last processed `cursor` |
@@ -25,7 +24,11 @@ Use HTTPS and `Authorization: Bearer <credential>` on authenticated routes. Proj
 | `POST /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/cancel` | Bound consumer grant | `200` with the event reference and `status: "cancelled"` after Google confirms deletion |
 | `PUT /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/rsvp` | Bound consumer grant | `200` with Google's confirmed event snapshot. The JSON body contains only `status`, one of `accepted`, `tentative` or `declined`. Send the canonical calendar ID and optionally pass the event's `version` as `If-Match` |
 
-Connection states are `active`, `auth_required` and `disconnected`. The timing fields are nullable RFC 3339 timestamps. For an active, admitted connection, `capabilities` reports `events.read`, `events.rsvp`, `events.create`, `events.update` and `events.cancel`. When the initial baseline is pending, listing invitations, creating, updating and cancelling events return `SYNC_PENDING`. Reauthorization with the same subject and calendar preserves the connection ID and any unrevoked consumer. Disconnect the current connection before linking a different Google account. An active or authorization-required connection reserves its calendar to its project subject. Pairing an additional consumer starts it at the beginning of the retained notification window.
+Connection states are `active`, `auth_required` and `disconnected`. The timing fields are nullable RFC 3339 timestamps. For an active connection, `capabilities` reports `events.read`, `events.rsvp`, `events.create`, `events.update` and `events.cancel`. When the initial baseline is pending, listing invitations, creating, updating and cancelling events return `SYNC_PENDING`. Reauthorization with the same Google subject and calendar preserves the connection ID and any unrevoked consumer. An active or authorization-required connection reserves its calendar to its linked subject. A new consumer starts at the beginning of the retained notification window.
+
+### Administration
+
+`GET /admin` lists connections with masked calendar identifiers, status and last sync time. `POST /admin/token/rotate` generates a replacement team token and displays it once. The previous token and any unredeemed sessions started with it stop working. `POST /admin/connections/{connectionId}/disconnect` disconnects the chosen calendar and revokes its consumer grants. All admin routes use HTTPS Basic authentication with username `admin` and the separate administrator credential. Admin POSTs require the service's own origin.
 
 ### Connection progress and timings
 
@@ -104,7 +107,7 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 | Cancel an event | `await client.events.cancel(ref, { ifMatch })` | `await client.events.cancel(ref, if_match=version)` |
 | Set RSVP | `await client.events.rsvp(ref, status, { ifMatch })` | `await client.events.rsvp(ref, status, if_match=...)` |
 
-`connect()` takes an HTTPS origin and a project credential supplier. An optional browser callback supports headless consent. The default uses the system browser on macOS and Linux in Node.js, and Python's `webbrowser` module in Python. The optional `saveGrant` or `save_grant` callback can save the returned grant to an approved secret store. Construct a client with that grant's connection ID, consumer ID and credential supplier to resume in a new process.
+`connect()` takes an HTTPS origin and a shared enrollment `token`. An optional browser callback supports headless consent. The default uses the system browser on macOS and Linux in Node.js, and Python's `webbrowser` module in Python. The optional `saveGrant` or `save_grant` callback can save the returned grant to an approved secret store. Construct a client with that grant's connection ID, consumer ID and credential supplier to resume in a new process.
 
 `start()` waits for the SSE `ready` frame. `stop()` closes the stream and drains the current item up to the configured deadline. Queries and writes remain callable with the listener stopped. Errors are typed `CalendarError` instances with `code`, optional HTTP status, request ID and retry hint. Python exposes attributes and changed-field names in snake_case. Event types, response values and error codes are shared across languages.
 
@@ -116,14 +119,14 @@ Calendar selection, calendar management, general event queries and editing the g
 
 ## SDK examples
 
-See the [Node.js quickstart](../sdks/node/README.md) or [Python quickstart](../sdks/python/README.md) for installation. These examples use application callbacks to obtain and store credentials, handle notifications, and select an invitation the user wants to answer.
+See the [Node.js quickstart](../sdks/node/README.md) or [Python quickstart](../sdks/python/README.md) for installation. These examples read the team token and use application callbacks to store the consumer grant, handle notifications, and select an invitation the user wants to answer.
 
 ```ts
 import { CalendarClient } from "gabriel-calendar";
 
 const client = await CalendarClient.connect({
   baseUrl: "https://calendar.example.invalid",
-  getProjectCredential,
+  token: process.env.GABRIEL_ENROLLMENT_TOKEN!,
   saveGrant,
 });
 
@@ -142,11 +145,13 @@ try {
 ```
 
 ```python
+import os
+
 from gabriel_calendar import CalendarClient
 
 client = await CalendarClient.connect(
     base_url="https://calendar.example.invalid",
-    get_project_credential=get_project_credential,
+    token=os.environ["GABRIEL_ENROLLMENT_TOKEN"],
     save_grant=save_grant,
 )
 client.on("invitation.received", on_invitation)

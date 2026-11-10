@@ -17,8 +17,7 @@ FIXTURE = json.loads((Path(__file__).resolve().parents[3] / "spec/fixtures/mvp.j
 
 @contextmanager
 def harness(test, steps):
-    project = random_source.token_urlsafe(32)
-    grant = random_source.token_urlsafe(32)
+    credentials = {kind: random_source.token_urlsafe(32) for kind in ("enrollment", "session", "grant")}
     remaining = deque(steps)
     failures = []
 
@@ -33,7 +32,7 @@ def harness(test, steps):
                 step = remaining.popleft()
                 test.assertEqual(self.path, step["path"])
                 test.assertEqual(self.command, step["method"])
-                expected = project if step.get("project") else grant
+                expected = credentials[step.get("auth", "grant")]
                 test.assertTrue(self.headers.get("Authorization") == "Bearer " + expected)
                 test.assertEqual(self.headers.get("If-Match"), step.get("ifMatch"))
                 test.assertEqual(self.headers.get("Idempotency-Key"), step.get("idempotencyKey"))
@@ -65,8 +64,10 @@ def harness(test, steps):
                     self.close_connection = True
                     return
                 payload = step.get("payload")
+                if step.get("issueSession"):
+                    payload = {**payload, "sessionCredential": credentials["session"]}
                 if step.get("grant"):
-                    payload = {**payload, "credential": grant}
+                    payload = {**payload, "credential": credentials["grant"]}
                 data = json.dumps(payload).encode() if payload is not None else b""
                 self.send_response(step["status"])
                 self.send_header("X-Request-Id", FIXTURE["requestId"])
@@ -86,7 +87,7 @@ def harness(test, steps):
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.02), daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{server.server_port}", project, grant
+        yield f"http://127.0.0.1:{server.server_port}", credentials["enrollment"], credentials["grant"]
     finally:
         server.shutdown()
         thread.join()
@@ -111,9 +112,9 @@ class Conformance(unittest.IsolatedAsyncioTestCase):
                 decode_notification(raw)
 
     async def test_lifecycle(self):
-        with harness(self, FIXTURE["steps"]) as (base, project, grant):
+        with harness(self, FIXTURE["steps"]) as (base, token, grant):
             client = await CalendarClient.connect(
-                base_url=base, get_project_credential=lambda: project,
+                base_url=base, token=token,
                 open_browser=lambda url: self.assertEqual(url, "https://consent.example.invalid/authorize"),
                 save_grant=lambda saved: self.assertTrue(saved.credential == grant),
             )

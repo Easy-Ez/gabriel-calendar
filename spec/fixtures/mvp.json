@@ -274,7 +274,8 @@
         "sessionId": "10000000-0000-4000-8000-000000000003",
         "authorizationUrl": "https://consent.example.invalid/authorize"
       },
-      "project": true
+      "auth": "enrollment",
+      "issueSession": true
     },
     {
       "method": "GET",
@@ -284,18 +285,17 @@
         "status": "connected",
         "connectionId": "10000000-0000-4000-8000-000000000001"
       },
-      "project": true
+      "auth": "session"
     },
     {
       "method": "POST",
-      "path": "/v1/connections/10000000-0000-4000-8000-000000000001/consumers",
+      "path": "/v1/connect-sessions/10000000-0000-4000-8000-000000000003/consumer",
       "status": 201,
       "payload": {
         "connectionId": "10000000-0000-4000-8000-000000000001",
         "consumerId": "10000000-0000-4000-8000-000000000002"
       },
-      "body": {},
-      "project": true,
+      "auth": "session",
       "grant": true
     },
     {

@@ -319,27 +319,28 @@ class CalendarClient:
 
     @classmethod
     async def connect(
-        cls, *, base_url: str, get_project_credential: Credential,
+        cls, *, base_url: str, token: str,
         open_browser: Callable[[str], None | Awaitable[None]] | None = None,
         save_grant: Callable[[Grant], None | Awaitable[None]] | None = None,
     ) -> CalendarClient:
         base = validated_url(base_url, origin_only=True)
-        require(callable(get_project_credential), "INVALID_ARGUMENT")
-        project = get_project_credential
+        require(matches(token, CREDENTIAL), "INVALID_ARGUMENT")
         try:
             async with asyncio.timeout(15 * 60):
-                session = object_value(await _request(base, "/v1/connect-sessions", project, method="POST"))
-                require(matches(session.get("sessionId"), UUID))
+                session = object_value(await _request(base, "/v1/connect-sessions", lambda: token, method="POST"))
+                require(matches(session.get("sessionId"), UUID) and matches(session.get("sessionCredential"), CREDENTIAL))
+                session_credential = session["sessionCredential"]
+                path = f"/v1/connect-sessions/{session['sessionId']}"
                 await _result((open_browser or _open_browser)(validated_url(session.get("authorizationUrl"))))
                 while True:
-                    result = object_value(await _request(base, f"/v1/connect-sessions/{session['sessionId']}", project))
+                    result = object_value(await _request(base, path, lambda: session_credential))
                     if result.get("status") == "failed":
                         raise CalendarError("CONSENT_FAILED")
                     if result.get("status") == "connected":
                         connection = result.get("connectionId")
                         require(matches(connection, UUID))
                         grant = object_value(await _request(
-                            base, f"/v1/connections/{connection}/consumers", project, method="POST", body={},
+                            base, f"{path}/consumer", lambda: session_credential, method="POST",
                         ))
                         require(grant.get("connectionId") == connection and matches(grant.get("consumerId"), UUID)
                                 and matches(grant.get("credential"), CREDENTIAL))

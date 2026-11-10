@@ -17,7 +17,7 @@ type Delivery = Payload & {
 type StreamOutput = { ready(): Promise<void>; send(notice: Delivery): Promise<void>; heartbeat(): Promise<void> };
 const pendingWatchMs = watchTtl * 1000;
 type Session = {
-  id: string; owner_id: string; status: string; connection_id: string | null; expires_at: Date;
+  id: string; status: string; connection_id: string | null; enrollment_revision: string;
   callback_started_at: Date | null; callback_completed_at: Date | null;
 };
 type Consumer = { checkpoint: string };
@@ -48,7 +48,6 @@ function onboarding(connection: Connection, watchExpiresAt: Date | null) {
 
 export class CalendarService {
   private readonly security: Security;
-  private readonly owners: ReadonlySet<string>;
   private activeReaders = 0;
   private readonly delivery = new EventEmitter().setMaxListeners(0);
   private deliveryListener?: PoolClient;
@@ -56,28 +55,46 @@ export class CalendarService {
 
   constructor(readonly pool: Pool, readonly config: Settings, private readonly google = new Google(config)) {
     this.security = new Security(config.dataKey);
-    this.owners = new Set(config.projectSessions.values());
   }
 
-  project(bearer: string) {
-    const owner = this.config.projectSessions.get(digest(bearer));
-    if (!owner) throw new ApiError("AUTH_REQUIRED");
-    return owner;
+  async rotateEnrollment() {
+    const token = nonce();
+    await this.pool.query(
+      `INSERT INTO enrollment_code (singleton,revision,credential_digest) VALUES (true,$1,$2)
+       ON CONFLICT (singleton) DO UPDATE SET revision=excluded.revision,credential_digest=excluded.credential_digest,rotated_at=now()`,
+      [randomUUID(), digest(token)]);
+    return token;
   }
 
-  async connect(owner: string) {
+  async administration(after: string) {
+    const [{ rows: connections }, { rows: [code] }] = await Promise.all([
+      this.pool.query<Pick<Connection, "id" | "calendar_id" | "status" | "last_sync_at">>(
+        `SELECT id,calendar_id,status,last_sync_at FROM connections
+         WHERE ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT 51`, [after || null]),
+      this.pool.query<{ rotated_at: Date }>("SELECT rotated_at FROM enrollment_code WHERE singleton"),
+    ]);
+    return { connections: connections.slice(0, 50), next: connections.length > 50 ? connections[49]!.id : undefined,
+      rotatedAt: code?.rotated_at };
+  }
+
+  async connect(token: string) {
     const id = randomUUID();
     const state = nonce();
+    const sessionCredential = nonce();
     const expiresAt = new Date(Date.now() + sessionLifetimeMs);
-    await this.pool.query(
-      "INSERT INTO connect_sessions (id,owner_id,state_digest,status,expires_at) VALUES ($1,$2,$3,'pending',$4)",
-      [id, owner, digest(state), expiresAt]);
-    return { sessionId: id, authorizationUrl: this.google.authorization(state, this.security.sign("pkce", state)), expiresAt };
+    const { rowCount } = await this.pool.query(
+      `INSERT INTO connect_sessions (id,state_digest,status,expires_at,credential_digest,enrollment_revision)
+       SELECT $1,$2,'pending',$3,$4,revision FROM enrollment_code WHERE singleton AND credential_digest=$5`,
+      [id, digest(state), expiresAt, digest(sessionCredential), digest(token)]);
+    if (!rowCount) throw new ApiError("AUTH_REQUIRED");
+    return { sessionId: id, sessionCredential,
+      authorizationUrl: this.google.authorization(state, this.security.sign("pkce", state)), expiresAt };
   }
 
-  async consent(owner: string, id: string) {
+  async consent(credential: string, id: string) {
     const { rows: [session] } = await this.pool.query<Session>(
-      "SELECT * FROM connect_sessions WHERE id=$1 AND owner_id=$2 AND expires_at>now()", [id, owner]);
+      `SELECT s.* FROM connect_sessions s JOIN enrollment_code e ON e.singleton AND e.revision=s.enrollment_revision
+       WHERE s.id=$1 AND s.credential_digest=$2 AND s.expires_at>now()`, [id, digest(credential)]);
     if (!session) throw new ApiError("NOT_FOUND");
     return {
       status: session.status === "processing" ? "pending" : session.status,
@@ -93,16 +110,16 @@ export class CalendarService {
   async callback(state: string, code: string | null) {
     const { rows: [session] } = await this.pool.query<Session>(
       `UPDATE connect_sessions SET status='processing',callback_started_at=clock_timestamp()
-       WHERE state_digest=$1 AND status='pending' AND expires_at>now() RETURNING *`, [digest(state)]);
+       WHERE state_digest=$1 AND status='pending' AND expires_at>now()
+        AND enrollment_revision=(SELECT revision FROM enrollment_code WHERE singleton) RETURNING *`, [digest(state)]);
     if (!session) throw new ApiError("INVALID_ARGUMENT");
 
     try {
-      if (!this.owners.has(session.owner_id)) throw new ApiError("FORBIDDEN");
       if (!code) throw new ApiError("OAUTH_CONSENT_DENIED");
       const tokens = await this.google.exchange(code, this.security.sign("pkce", state));
       if (!tokens.refresh) throw new ApiError("OAUTH_OFFLINE_GRANT_MISSING");
-      const calendar = await this.google.primary(tokens.access);
-      await this.bindPrimary(session, calendar, tokens.refresh);
+      const [subject, calendar] = await Promise.all([this.google.subject(tokens.access), this.google.primary(tokens.access)]);
+      await this.bindPrimary(session, "google:" + this.security.sign("google-subject", subject), calendar, tokens.refresh);
     } catch (error) {
       await this.pool.query(
         "UPDATE connect_sessions SET status='failed',callback_completed_at=clock_timestamp() WHERE id=$1", [session.id]);
@@ -119,11 +136,13 @@ export class CalendarService {
     }
   }
 
-  private async bindPrimary(session: Session, calendar: string, refresh: string) {
-    const owner = session.owner_id;
+  private async bindPrimary(session: Session, owner: string, calendar: string, refresh: string) {
     const db = await this.pool.connect();
     try {
       await transaction(db, async () => {
+        const { rowCount } = await db.query(
+          "SELECT 1 FROM enrollment_code WHERE singleton AND revision=$1 FOR SHARE", [session.enrollment_revision]);
+        if (!rowCount) throw new ApiError("AUTH_REQUIRED");
         // Serialize binding by both identities so concurrent OAuth callbacks cannot claim either twice.
         for (const key of [`oauth-owner:${owner}`, `oauth-calendar:${calendar}`]) {
           await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
@@ -194,7 +213,6 @@ export class CalendarService {
 
   private active(connection: Connection) {
     if (connection.status !== "active") throw new ApiError("AUTH_REQUIRED");
-    if (!this.owners.has(connection.owner_id)) throw new ApiError("FORBIDDEN");
   }
 
   private async grant(bearer: string, connection: string, consumer?: string, db: Pool | PoolClient = this.pool) {
@@ -205,10 +223,8 @@ export class CalendarService {
   }
 
   async status(bearer: string, id: string) {
-    const owner = this.config.projectSessions.get(digest(bearer));
-    if (!owner) await this.grant(bearer, id);
+    await this.grant(bearer, id);
     const connection = await this.connection(id);
-    if (owner && owner !== connection.owner_id) throw new ApiError("NOT_FOUND");
     const { rows: [watch] } = await this.pool.query<{ expires: Date | null }>(
       "SELECT max(expires_at) AS expires FROM channels WHERE connection_id=$1 AND resource_id IS NOT NULL AND expires_at>now()",
       [id]);
@@ -221,21 +237,33 @@ export class CalendarService {
       lastWebhookAt: connection.last_webhook_at,
       watchExpiresAt,
       onboarding: onboarding(connection, watchExpiresAt),
-      capabilities: connection.status === "active" && this.owners.has(connection.owner_id)
+      capabilities: connection.status === "active"
         ? ["events.read", "events.rsvp", "events.create", "events.update", "events.cancel"] : [],
     };
   }
 
-  async pair(owner: string, id: string) {
+  async redeem(sessionCredential: string, sessionId: string) {
     const consumer = randomUUID();
     const credential = nonce();
     const db = await this.pool.connect();
     try {
       return await transaction(db, async () => {
+        const { rows: [current] } = await db.query<{ revision: string }>(
+          "SELECT revision FROM enrollment_code WHERE singleton FOR SHARE");
+        const verifier = digest(sessionCredential);
+        const { rows: [session] } = await db.query<{ connection_id: string }>(
+          `SELECT connection_id FROM connect_sessions WHERE id=$1 AND credential_digest=$2 AND enrollment_revision=$3
+           AND status='connected' AND redeemed_at IS NULL AND expires_at>now()`, [sessionId, verifier, current?.revision ?? null]);
+        if (!session) throw new ApiError("NOT_FOUND");
+        const id = session.connection_id;
         const { rows: [connection] } = await db.query<Connection>(
-          "SELECT * FROM connections WHERE id=$1 AND owner_id=$2 FOR UPDATE", [id, owner]);
+          "SELECT * FROM connections WHERE id=$1 FOR UPDATE", [id]);
         if (!connection) throw new ApiError("NOT_FOUND");
         this.active(connection);
+        const { rowCount } = await db.query(
+          `UPDATE connect_sessions SET redeemed_at=now()
+           WHERE id=$1 AND status='connected' AND redeemed_at IS NULL`, [sessionId]);
+        if (!rowCount) throw new ApiError("NOT_FOUND");
         const expired = await this.expiredThrough(db, id, connection.pruned_through);
         await db.query(
           `INSERT INTO consumers (id,connection_id,grant_digest,checkpoint) VALUES ($1,$2,$3,$4)`,
@@ -497,10 +525,9 @@ export class CalendarService {
     return result;
   }
 
-  async disconnect(owner: string, id: string) {
+  async disconnect(id: string) {
     const result = await this.exclusive(id, async db => {
       const connection = await this.connection(id, db);
-      if (connection.owner_id !== owner) throw new ApiError("NOT_FOUND");
       const { rows: watches } = await db.query<{ id: string; resource_id: string }>(
         `SELECT id,resource_id FROM channels WHERE connection_id=$1 AND resource_id IS NOT NULL AND expires_at>now()`,
         [id]);
@@ -511,6 +538,7 @@ export class CalendarService {
            pruned_through=greatest(pruned_through,coalesce((SELECT max(seq) FROM notifications WHERE connection_id=$1),0))
            WHERE id=$1`, [id]);
         await db.query("UPDATE consumers SET revoked=true WHERE connection_id=$1", [id]);
+        await db.query("UPDATE connect_sessions SET status='failed' WHERE connection_id=$1 AND redeemed_at IS NULL", [id]);
         await db.query("DELETE FROM events WHERE connection_id=$1", [id]);
         await db.query("DELETE FROM notifications WHERE connection_id=$1", [id]);
         await db.query("DELETE FROM channels WHERE connection_id=$1", [id]);
@@ -695,11 +723,6 @@ export class CalendarService {
     await locked(this.pool, `connection:${id}`, async db => {
       const connection = await this.connection(id, db);
       if (connection.status !== "active") return;
-      if (!this.owners.has(connection.owner_id)) {
-        this.access.delete(id);
-        await db.query("UPDATE connections SET status='auth_required' WHERE id=$1", [id]);
-        return;
-      }
       const now = Date.now();
       if (connection.sync_retry_at.getTime() <= now &&
           (connection.revision !== connection.synced_revision || connection.sync_due_at.getTime() <= now)) {

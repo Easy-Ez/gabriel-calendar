@@ -220,6 +220,7 @@ export class Google {
     auth: "https://accounts.google.com/o/oauth2/v2/auth",
     token: "https://oauth2.googleapis.com/token",
     calendar: "https://www.googleapis.com/calendar/v3",
+    userinfo: "https://openidconnect.googleapis.com/v1/userinfo",
   }) {}
 
   private get redirectUri() { return this.config.baseUrl + callbackPath; }
@@ -228,7 +229,7 @@ export class Google {
     const url = new URL(this.endpoints.auth);
     url.search = new URLSearchParams({
       client_id: this.config.googleClientId, redirect_uri: this.redirectUri, response_type: "code",
-      scope: scopes.join(" "), access_type: "offline", prompt: "select_account consent", state,
+      scope: ["openid", ...scopes].join(" "), access_type: "offline", prompt: "select_account consent", state,
       code_challenge: digest(verifier), code_challenge_method: "S256",
     }).toString();
     return url.href;
@@ -298,6 +299,14 @@ export class Google {
         /\s/.test(result.id)) throw malformed();
     if (result.primary !== true || result.accessRole !== "owner") throw new GoogleError(403, "primary_role_mismatch");
     return result.id;
+  }
+
+  async subject(access: string) {
+    const identity = record(await this.request(this.endpoints.userinfo, {
+      method: "GET", headers: { authorization: `Bearer ${access}` },
+    }));
+    if (typeof identity?.sub !== "string" || !/^[\x21-\x7e]{1,255}$/.test(identity.sub)) throw malformed();
+    return identity.sub;
   }
 
   async readCopy(access: string, calendar: string, id: string, deadline: AbortSignal) {

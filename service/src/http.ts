@@ -6,6 +6,7 @@ import { ApiError, calendarId, callbackPath, eventId, log, opaque, record, text,
 import { createInput, guestNotification, responses, updateInput, validVersion } from "./google.js";
 import type { GoogleWrite, Rsvp } from "./google.js";
 import type { CalendarService } from "./service.js";
+import { admin } from "./admin.js";
 
 const bodyLimit = 6144;
 type Reply = { status: number; body?: object | string; googleConfirmedAt?: number };
@@ -114,12 +115,17 @@ async function route(service: CalendarService, req: IncomingMessage, url: URL, s
   }
   if (method === "POST" && pathname === "/v1/connect-sessions") {
     query(url, []);
-    return ok(await service.connect(service.project(bearer(req))), 201);
+    return ok(await service.connect(bearer(req)), 201);
   }
   const parts = pathname.split("/");
   if (parts[1] === "v1" && parts[2] === "connect-sessions" && parts.length === 4 && method === "GET") {
     query(url, []);
-    return ok(await service.consent(service.project(bearer(req)), segment(parts[3], uuid)));
+    return ok(await service.consent(bearer(req), segment(parts[3], uuid)));
+  }
+  if (parts[1] === "v1" && parts[2] === "connect-sessions" && parts.length === 5 &&
+      parts[4] === "consumer" && method === "POST") {
+    query(url, []);
+    return ok(await service.redeem(bearer(req), segment(parts[3], uuid)), 201);
   }
   if (parts[1] !== "v1" || parts[2] !== "connections") throw new ApiError("NOT_FOUND");
 
@@ -129,18 +135,7 @@ async function route(service: CalendarService, req: IncomingMessage, url: URL, s
     query(url, []);
     return ok(await service.status(credential, id));
   }
-  if (parts.length === 5 && parts[4] === "disconnect" && method === "POST") {
-    query(url, []);
-    await service.disconnect(service.project(credential), id);
-    return noContent;
-  }
   if (parts[4] === "consumers") {
-    if (parts.length === 5 && method === "POST") {
-      query(url, []);
-      const owner = service.project(credential);
-      await body(req, []);
-      return ok(await service.pair(owner, id), 201);
-    }
     if (parts.length === 7) {
       const consumer = segment(parts[5], uuid);
       if (parts[6] === "notifications" && method === "GET") {
@@ -218,6 +213,10 @@ async function handle(service: CalendarService, req: IncomingMessage, res: Serve
       throw new ApiError("INVALID_ARGUMENT");
     }
     const url = new URL(req.url, "https://service.invalid");
+    if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
+      await admin(service, req, res, url);
+      return;
+    }
     const stream = /^\/v1\/connections\/([^/]+)\/consumers\/([^/]+)\/stream$/.exec(url.pathname);
     if (stream && req.method === "GET") {
       query(url, []);

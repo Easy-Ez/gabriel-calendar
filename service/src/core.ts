@@ -7,7 +7,6 @@ export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 export const opaque = /^[A-Za-z0-9_-]{43}$/;
 export const eventId = /^[A-Za-z0-9_-]{1,1024}$/;
 export const calendarId = /^(?!\.{1,2}$)[A-Za-z0-9_@.+#-]{1,512}$/;
-export const subjectId = /^[A-Za-z0-9_-]{1,128}$/;
 export const digest = (value: string) => createHash("sha256").update(value).digest("base64url");
 export const nonce = () => randomBytes(32).toString("base64url");
 
@@ -48,7 +47,7 @@ export interface Settings {
   googleClientId: string;
   googleClientSecret: string;
   dataKey: Buffer;
-  projectSessions: ReadonlyMap<string, string>; // credential digest → deployment-assigned subject
+  adminTokenDigest: string;
   catchupMs: number;
   tickMs: number;
   retentionMs: number;

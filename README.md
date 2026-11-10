@@ -15,7 +15,7 @@ Listen for meeting invitations, reschedules, cancellations, and RSVP changes on 
 
 ## Quick start
 
-If your team already runs Gabriel Calendar, ask the operator for its HTTPS base URL and your own project session. Set `GABRIEL_BASE_URL` to the service origin, such as `https://calendar.example.invalid`, and inject `GABRIEL_PROJECT_SESSION` from your secret store. `connect()` opens Google consent. Choose the account your operator has approved for the test project.
+Ask your operator for the HTTPS base URL and the team's shared enrollment token. Set `GABRIEL_BASE_URL` to the service origin, such as `https://calendar.example.invalid`, and inject `GABRIEL_ENROLLMENT_TOKEN` from your secret store. `connect()` opens Google consent and obtains a separate credential for your account. In Google Testing mode, choose an account on the test-user list.
 
 ### Node.js (22+)
 
@@ -30,7 +30,7 @@ import { CalendarClient } from "gabriel-calendar";
 
 const client = await CalendarClient.connect({
   baseUrl: process.env.GABRIEL_BASE_URL,
-  getProjectCredential: () => process.env.GABRIEL_PROJECT_SESSION,
+  token: process.env.GABRIEL_ENROLLMENT_TOKEN,
 });
 
 client.on("invitation.received", (notice) => {
@@ -64,7 +64,7 @@ from gabriel_calendar import CalendarClient
 async def main():
     client = await CalendarClient.connect(
         base_url=os.environ["GABRIEL_BASE_URL"],
-        get_project_credential=lambda: os.environ["GABRIEL_PROJECT_SESSION"],
+        token=os.environ["GABRIEL_ENROLLMENT_TOKEN"],
     )
 
     @client.on("invitation.received")
@@ -93,7 +93,7 @@ After the first sync completes, send a new test invitation to the connected acco
 
 ### First connection
 
-The operator registers the user and issues a personal project credential. The service uses it to identify the user before opening Google consent. [User and permission setup](docs/zh-CN/testing.md#人员与权限管理)
+The operator creates one shared enrollment token at `/admin`. The service issues a short-lived credential for each authorization session and identifies the account through Google. [Administration and onboarding](docs/zh-CN/testing.md#接入码与连接管理)
 
 ```mermaid
 sequenceDiagram
@@ -103,15 +103,15 @@ sequenceDiagram
     participant C as Google
 
     U->>S: Run connect()
-    S->>G: Request an authorization link with the project credential
-    G-->>S: Google consent URL
+    S->>G: Start enrollment with the team token
+    G-->>S: Google consent URL and private session credential
     S-->>U: Open the browser
     U->>C: Choose an account and allow Calendar access
     C-->>U: Redirect to the Gabriel callback
     U->>G: Browser delivers the authorization code
-    G->>C: Exchange the code and look up the primary calendar
-    C-->>G: Offline access and primary calendar
-    S->>G: Check the connection and pair a consumer
+    G->>C: Exchange the code, verify identity and find the primary calendar
+    C-->>G: Google account ID, offline access and primary calendar
+    S->>G: Check and redeem the session with its private credential
     G-->>S: Connection ID, consumer ID, and consumer credential
     Note over G,C: Background sync builds the baseline, then registers events.watch
 ```

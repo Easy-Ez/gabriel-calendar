@@ -15,7 +15,7 @@
 
 ## 快速上手
 
-团队已有服务时，向管理员拿到 HTTPS 地址和个人项目会话凭据即可接入。`GABRIEL_BASE_URL` 填服务的域名地址（例如 `https://calendar.example.invalid`），`GABRIEL_PROJECT_SESSION` 由密钥存储注入。`connect()` 会打开 Google 授权页，选择管理员已加入测试项目的账号。
+向管理员拿到 HTTPS 服务地址和团队共享接入码。`GABRIEL_BASE_URL` 填服务域名地址（例如 `https://calendar.example.invalid`），`GABRIEL_ENROLLMENT_TOKEN` 由密钥存储注入。`connect()` 会打开 Google 授权页，授权后 SDK 获得你自己的日历凭据。Google 仍处于 Testing 时，请选择已加入测试名单的账号。
 
 ### Node.js（22+）
 
@@ -30,7 +30,7 @@ import { CalendarClient } from "gabriel-calendar";
 
 const client = await CalendarClient.connect({
   baseUrl: process.env.GABRIEL_BASE_URL,
-  getProjectCredential: () => process.env.GABRIEL_PROJECT_SESSION,
+  token: process.env.GABRIEL_ENROLLMENT_TOKEN,
 });
 
 client.on("invitation.received", (notice) => {
@@ -64,7 +64,7 @@ from gabriel_calendar import CalendarClient
 async def main():
     client = await CalendarClient.connect(
         base_url=os.environ["GABRIEL_BASE_URL"],
-        get_project_credential=lambda: os.environ["GABRIEL_PROJECT_SESSION"],
+        token=os.environ["GABRIEL_ENROLLMENT_TOKEN"],
     )
 
     @client.on("invitation.received")
@@ -93,7 +93,7 @@ except KeyboardInterrupt:
 
 ### 首次连接
 
-管理员先登记用户并发放个人项目凭据。服务在打开 Google 授权页之前，用这份凭据确认授权会绑定给谁。[人员与权限管理](docs/zh-CN/testing.md#人员与权限管理)
+管理员在 `/admin` 生成团队共享接入码。每次授权都有独立的临时会话凭据，服务根据 Google 验证的账号绑定日历。[接入码与连接管理](docs/zh-CN/testing.md#接入码与连接管理)
 
 ```mermaid
 sequenceDiagram
@@ -103,15 +103,15 @@ sequenceDiagram
     participant C as Google
 
     U->>S: 运行 connect()
-    S->>G: 带个人项目凭据申请授权链接
-    G-->>S: Google 授权地址
+    S->>G: 带团队接入码开始授权
+    G-->>S: Google 授权地址和独立会话凭据
     S-->>U: 打开浏览器
     U->>C: 选择账号并同意日历访问
     C-->>U: 重定向到 Gabriel 回调地址
     U->>G: 浏览器把授权码带到回调
-    G->>C: 交换授权码并查询主日历
-    C-->>G: 返回离线授权和主日历
-    S->>G: 查询连接状态并配对 consumer
+    G->>C: 交换授权码、验证账号并查询主日历
+    C-->>G: 返回 Google 账号 ID、离线授权和主日历
+    S->>G: 用临时会话凭据查询状态并领取 consumer
     G-->>S: 返回连接 ID、consumer ID 和凭据
     Note over G,C: 后台建立首次同步基线，再注册 events.watch
 ```

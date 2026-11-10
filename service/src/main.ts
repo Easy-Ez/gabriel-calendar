@@ -2,25 +2,20 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
-import { digest, log, opaque, record, subjectId, text, transaction } from "./core.js";
+import { log, opaque, text, transaction } from "./core.js";
 import type { Settings } from "./core.js";
 import { httpServer } from "./http.js";
 import { CalendarService } from "./service.js";
 
 const { Pool } = pg;
 const migrations = ["001_initial.sql", "002_event_create.sql", "003_event_manage.sql", "004_event_guests.sql",
-  "005_onboarding_timing.sql", "006_delivery_timing.sql", "007_reserved.sql", "008_consumer_write_defaults.sql"];
+  "005_onboarding_timing.sql", "006_delivery_timing.sql", "007_reserved.sql", "008_consumer_write_defaults.sql",
+  "009_shared_enrollment.sql"];
 
 function required(name: string, max = 8192) {
   const value = process.env[name];
   if (!text(value, max)) throw new Error(name);
   return value;
-}
-
-function entries(name: string) {
-  const value = record(JSON.parse(required(name, 65_536)));
-  if (!value || Object.keys(value).length === 0 || Object.keys(value).length > 100) throw new Error(name);
-  return Object.entries(value);
 }
 
 function numberSetting(name: string, fallback: number, min: number, max: number) {
@@ -43,26 +38,13 @@ function settings(): Settings {
   const rawKey = required("GABRIEL_DATA_KEY", 43);
   const dataKey = Buffer.from(rawKey, "base64url");
   if (!opaque.test(rawKey) || dataKey.toString("base64url") !== rawKey) throw new Error("GABRIEL_DATA_KEY");
-  const projectSessions = new Map<string, string>();
-  for (const [subject, credential] of entries("GABRIEL_PROJECT_SESSIONS")) {
-    if (!subjectId.test(subject) || /\s/.test(subject) || typeof credential !== "string" || !opaque.test(credential) || credential.length !== 43 ||
-        projectSessions.has(digest(credential))) throw new Error("GABRIEL_PROJECT_SESSIONS");
-    projectSessions.set(digest(credential), subject);
-  }
-  if (process.env.GABRIEL_PROJECT_SESSION_DIGESTS !== undefined) {
-    const configured = new Set(projectSessions.values());
-    for (const [subject, verifier] of entries("GABRIEL_PROJECT_SESSION_DIGESTS")) {
-      if (!subjectId.test(subject) || /\s/.test(subject) || configured.has(subject) ||
-          typeof verifier !== "string" || verifier.length !== 43 || !opaque.test(verifier) ||
-          projectSessions.has(verifier)) throw new Error("GABRIEL_PROJECT_SESSION_DIGESTS");
-      projectSessions.set(verifier, subject);
-    }
-  }
+  const adminTokenDigest = required("GABRIEL_ADMIN_TOKEN_DIGEST", 43);
+  if (!opaque.test(adminTokenDigest)) throw new Error("GABRIEL_ADMIN_TOKEN_DIGEST");
   return {
     baseUrl: base.origin,
     googleClientId: required("GOOGLE_CLIENT_ID", 512),
     googleClientSecret: required("GOOGLE_CLIENT_SECRET", 512),
-    dataKey, projectSessions,
+    dataKey, adminTokenDigest,
     tickMs: numberSetting("GABRIEL_TICK_MS", 1000, 250, 60_000),
     catchupMs: numberSetting("GABRIEL_CATCHUP_MS", 300_000, 10_000, 3_600_000),
     retentionMs: numberSetting("GABRIEL_RETENTION_MS", 7 * 86400_000, 60_000, 30 * 86400_000),
