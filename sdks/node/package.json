@@ -1,10 +1,12 @@
 {
   "name": "gabriel-calendar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Node.js SDK for the Gabriel Calendar service",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Easy-Ez/gabriel-calendar.git",
@@ -12,12 +14,20 @@
   },
   "homepage": "https://github.com/Easy-Ez/gabriel-calendar#readme",
   "bugs": "https://github.com/Easy-Ez/gabriel-calendar/issues",
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.mjs"
