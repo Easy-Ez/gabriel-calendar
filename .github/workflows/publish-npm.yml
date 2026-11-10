@@ -71,4 +71,4 @@ jobs:
           name: npm-distribution
           path: dist
       - name: Publish verified tarball with Trusted Publishing
-        run: npm publish dist/gabriel-calendar-*.tgz
+        run: npm publish ./dist/gabriel-calendar-*.tgz
