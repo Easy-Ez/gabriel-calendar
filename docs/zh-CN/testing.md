@@ -31,7 +31,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 ## 接入码与连接管理
 
 1. 在服务的 HTTPS 地址打开 `/admin`，用用户名 `admin` 和管理员密码登录。首次使用密钥管理系统中的初始管理员凭据。点 **Change password**，输入当前密码并设置自己的 16–128 字符密码。保存后用新密码登录。
-2. 点 **Create access code** 创建共享接入码，或点 **View and copy access code** 查看和复制当前码。升级前的接入码需要点 **Save existing access code** 并录入一次原值，服务验证后会加密保存，原码继续有效。通过团队的密钥管理系统将 HTTPS 地址和接入码分发给同事。Google 项目仍处于 External / Testing 时，账号仍须加入 Google 测试用户名单。
+2. 当前共享码直接显示在 **Team access**，点 **Copy access code** 复制。首次使用时点 **Create access code**。只保留过校验值的旧码可通过 **Save existing access code** 录入一次原值，服务验证后会加密保存，原码继续有效。通过团队的密钥管理系统将 HTTPS 地址和接入码分发给同事。Google 项目仍处于 External / Testing 时，账号仍须加入 Google 测试用户名单。
 3. 同事把地址填入 SDK 的 `baseUrl` / `base_url`，将共享码传给 `token`，在 SDK 打开的 Google 页面用自己的账号授权。SDK 拿到独立的 consumer grant，之后读写和接收 SSE 都用这份凭据。
 
 点 **Replace access code** 并确认可轮换共享码。旧码和它发起的未完成会话立即失效，已领取的 consumer grant 继续工作。管理页显示连接 ID、脱敏日历、状态和最近同步时间。对某条连接点 **Disconnect** 并确认会解除绑定、撤销该连接的所有 consumer grant 并尝试停止 Google Watch。持有当前接入码的账号可以重新授权。若接入码泄露，先重置，再断开任何需要撤销的连接。

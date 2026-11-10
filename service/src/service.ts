@@ -68,11 +68,18 @@ export class CalendarService {
     return token;
   }
 
+  private async enrollmentForAdmin() {
+    const { rows: [code] } = await this.pool.query<{
+      revision: string; credential_ciphertext: string | null; rotated_at: Date;
+    }>("SELECT revision,credential_ciphertext,rotated_at FROM enrollment_code WHERE singleton");
+    return { rotatedAt: code?.rotated_at, token: code?.credential_ciphertext
+      ? this.security.decrypt(`team-enrollment:${code.revision}`, code.credential_ciphertext) : undefined };
+  }
+
   async revealEnrollment() {
-    const { rows: [code] } = await this.pool.query<{ revision: string; credential_ciphertext: string | null }>(
-      "SELECT revision,credential_ciphertext FROM enrollment_code WHERE singleton");
-    if (!code?.credential_ciphertext) throw new ApiError("NOT_FOUND");
-    return this.security.decrypt(`team-enrollment:${code.revision}`, code.credential_ciphertext);
+    const { token } = await this.enrollmentForAdmin();
+    if (!token) throw new ApiError("NOT_FOUND");
+    return token;
   }
 
   async saveEnrollment(token: string) {
@@ -89,15 +96,14 @@ export class CalendarService {
   }
 
   async administration(after: string) {
-    const [{ rows: connections }, { rows: [code] }] = await Promise.all([
+    const [{ rows: connections }, code] = await Promise.all([
       this.pool.query<Pick<Connection, "id" | "calendar_id" | "status" | "last_sync_at">>(
         `SELECT id,calendar_id,status,last_sync_at FROM connections
          WHERE ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT 51`, [after || null]),
-      this.pool.query<{ rotated_at: Date; can_reveal: boolean }>(
-        "SELECT rotated_at,credential_ciphertext IS NOT NULL AS can_reveal FROM enrollment_code WHERE singleton"),
+      this.enrollmentForAdmin(),
     ]);
     return { connections: connections.slice(0, 50), next: connections.length > 50 ? connections[49]!.id : undefined,
-      rotatedAt: code?.rotated_at, canReveal: code?.can_reveal ?? false };
+      ...code };
   }
 
   async connect(token: string) {

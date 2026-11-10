@@ -43,13 +43,18 @@ async function form(req: IncomingMessage, keys: readonly string[]) {
   return input;
 }
 
+function copyAccessCode(token: string) {
+  return `<div class="stack">
+<label class="field">Access code<input class="mono" id="access-code" value="${escape(token)}" readonly spellcheck="false"></label>
+<div class="actions"><button class="button primary" id="copy-code" type="button">Copy access code</button>
+<span class="meta" id="copy-status" role="status"></span></div></div>`;
+}
+
 function accessCode(res: ServerResponse, baseUrl: string, token: string, title = "Team access code") {
   page(res, title, "Give your team the service URL and the access code through your team’s secret manager.", `
 <section class="card narrow stack">
 <label class="field">Service URL<input class="mono" value="${escape(baseUrl)}" readonly></label>
-<label class="field">Access code<input class="mono" id="access-code" value="${escape(token)}" readonly spellcheck="false"></label>
-<div class="actions"><button class="button primary" id="copy-code" type="button">Copy access code</button>
-<a class="button" href="/admin">Back to overview</a></div><div class="meta" id="copy-status" role="status"></div>
+${copyAccessCode(token)}<div><a class="button" href="/admin">Back to overview</a></div>
 </section>`, true);
 }
 
@@ -69,7 +74,7 @@ ${message ? `<p class="notice" role="alert">${escape(message)}</p>` : ""}
 }
 
 async function dashboard(service: CalendarService, res: ServerResponse, after: string | null) {
-  const { connections, next, rotatedAt, canReveal } = await service.administration(after ?? "");
+  const { connections, next, rotatedAt, token } = await service.administration(after ?? "");
   const rows = connections.map(connection => `<tr>
 <td>${escape(masked(connection.calendar_id))}</td><td><code>${escape(connection.id)}</code></td>
 <td><span class="chip ${escape(connection.status)}">${statusLabels[connection.status]}</span></td>
@@ -80,9 +85,7 @@ async function dashboard(service: CalendarService, res: ServerResponse, after: s
 <button class="button danger" type="submit">Confirm disconnect</button></form></details>`}</td></tr>`);
   const accessActions = !rotatedAt ? `
 <form method="post" action="/admin/token/rotate"><button class="button primary" type="submit">Create access code</button></form>`
-    : `${canReveal ? `
-<form method="post" action="/admin/token/reveal"><button class="button primary" type="submit">View and copy access code</button></form>`
-    : `<a class="button primary" href="/admin/token/save">Save existing access code</a>`}
+    : `${token ? copyAccessCode(token) : '<a class="button primary" href="/admin/token/save">Save existing access code</a>'}
 <details><summary>Replace access code</summary><p>The old code and incomplete sign-ins stop working.
 Existing calendar connections stay connected.</p><form method="post" action="/admin/token/rotate">
 <button class="button danger" type="submit">Confirm replacement</button></form></details>`;
@@ -103,7 +106,7 @@ ${rows.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="
 <thead><tr><th scope="col">Calendar</th><th scope="col">Connection ID</th><th scope="col">Status</th><th scope="col">Last sync</th>
 <th scope="col">Action</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`
     : '<p class="empty">No calendar connections yet.</p>'}
-${next ? `<p><a href="/admin?after=${escape(next)}">Next page</a></p>` : ""}</section>`);
+${next ? `<p><a href="/admin?after=${escape(next)}">Next page</a></p>` : ""}</section>`, Boolean(token));
 }
 
 function saveCode(res: ServerResponse, message?: string) {

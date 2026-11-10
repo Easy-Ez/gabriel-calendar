@@ -372,12 +372,19 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   }
 
   let teamToken = await rotate();
-  assert.equal((await fetch(base + "/admin")).status, 401);
+  const anonymous = await fetch(base + "/admin");
+  assert.equal(anonymous.status, 401);
+  assert(!(await anonymous.text()).includes(teamToken));
   assert.equal((await admin("/admin", "GET", config.baseUrl, teamToken)).status, 401);
   assert.equal((await admin("/admin/token/rotate", "POST", "https://untrusted.example.invalid")).status, 403);
   assert.equal((await admin("/admin/token/reveal", "POST", "https://untrusted.example.invalid")).status, 403);
   assert.equal((await admin("/admin/token/reveal", "GET")).status, 404);
-  assert(!(await (await admin("/admin")).text()).includes(teamToken));
+  const overview = await admin("/admin");
+  assert.equal(overview.headers.get("cache-control"), "no-store");
+  const overviewHtml = await overview.text();
+  assert(overviewHtml.includes(`id="access-code" value="${teamToken}"`));
+  assert(overviewHtml.includes('id="copy-code"'));
+  assert(!overviewHtml.includes('action="/admin/token/reveal"'));
 
   async function begin() {
     const { sessionId, authorizationUrl, sessionCredential } =
@@ -403,21 +410,25 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   await pool.query("UPDATE enrollment_code SET credential_ciphertext=NULL WHERE singleton AND credential_digest=$1",
     [digest(teamToken)]);
   assert.equal((await admin("/admin/token/reveal", "POST")).status, 404);
-  assert.match(await (await admin("/admin")).text(), /Save existing access code/);
+  const legacyHtml = await (await admin("/admin")).text();
+  assert.match(legacyHtml, /Save existing access code/);
+  assert(!legacyHtml.includes('id="access-code"'));
   const save = (token: string) => admin("/admin/token/save", "POST", config.baseUrl, adminToken, new URLSearchParams({ token }));
   assert.equal((await save(nonce())).status, 400);
   assert.equal((await save(teamToken)).status, 200);
   assert.equal((await request(abandoned.path, abandoned.credential)).status, 200);
-  const revealed = await admin("/admin/token/reveal", "POST");
+  const revealed = await admin("/admin");
   assert.equal(revealed.status, 200);
   assert.equal(revealed.headers.get("cache-control"), "no-store");
   assert((await revealed.text()).includes(`id="access-code" value="${teamToken}"`));
   const oldToken = teamToken;
   teamToken = await rotate();
   assert(oldToken !== teamToken);
-  const replacement = await admin("/admin/token/reveal", "POST");
+  const replacement = await admin("/admin");
   assert.equal(replacement.status, 200);
-  assert((await replacement.text()).includes(`id="access-code" value="${teamToken}"`));
+  const replacementHtml = await replacement.text();
+  assert(replacementHtml.includes(`id="access-code" value="${teamToken}"`));
+  assert(!replacementHtml.includes(oldToken));
   assert.equal((await request("/v1/connect-sessions", oldToken, "POST")).status, 401);
   assert.equal((await request(abandoned.path, abandoned.credential)).status, 404);
   assert.equal((await fetch(abandoned.callback)).status, 400);
@@ -922,7 +933,8 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.equal(dashboard.status, 200);
   const dashboardHtml = await dashboard.text();
   assert(dashboardHtml.includes(connectionId) && dashboardHtml.includes(visitorReader.connectionId));
-  assert(!dashboardHtml.includes(calendar) && !dashboardHtml.includes(visitorCalendar) && !dashboardHtml.includes(teamToken));
+  assert(!dashboardHtml.includes(calendar) && !dashboardHtml.includes(visitorCalendar));
+  assert(dashboardHtml.includes(`id="access-code" value="${teamToken}"`));
   const disconnect = `/admin/connections/${connectionId}/disconnect`;
   assert.equal((await request(disconnect, reader.credential, "POST")).status, 401);
   assert.equal((await admin(disconnect, "POST", "https://untrusted.example.invalid")).status, 403);
