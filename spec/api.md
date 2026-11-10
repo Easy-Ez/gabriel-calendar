@@ -28,7 +28,13 @@ Connection states are `active`, `auth_required` and `disconnected`. The timing f
 
 ### Administration
 
-`GET /admin` lists connections with masked calendar identifiers, status and last sync time. `POST /admin/token/rotate` generates a replacement team token and displays it once. The previous token and any unredeemed sessions started with it stop working. `POST /admin/connections/{connectionId}/disconnect` disconnects the chosen calendar and revokes its consumer grants. All admin routes use HTTPS Basic authentication with username `admin` and the separate administrator credential. Admin POSTs require the service's own origin.
+All admin routes use HTTPS Basic authentication with username `admin` and the separate administrator password. Admin POSTs require the service's own origin.
+
+- `GET /admin` lists connections with masked calendar identifiers, status and last sync time.
+- `POST /admin/password` accepts the form fields `current`, `next` and `confirm`. The new password takes effect immediately and replaces the previous credential, including the initial credential supplied at deployment.
+- `POST /admin/token/reveal` shows the current team token. `POST /admin/token/save` accepts a `token` form field to store an encrypted copy of a pre-upgrade token after verifying it against the existing digest. This preserves the token and its enrollment sessions.
+- `POST /admin/token/rotate` generates, encrypts and shows a replacement team token. The previous token and any unredeemed sessions started with it stop working.
+- `POST /admin/connections/{connectionId}/disconnect` disconnects the chosen calendar and revokes its consumer grants.
 
 ### Connection progress and timings
 

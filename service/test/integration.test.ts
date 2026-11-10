@@ -340,18 +340,18 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
     });
   }
 
-  function admin(path: string, method = "GET", origin = config.baseUrl, credential = adminToken) {
+  function admin(path: string, method = "GET", origin = config.baseUrl, credential = adminToken, body?: URLSearchParams) {
     return fetch(base + path, { method, redirect: "manual", headers: {
       Authorization: "Basic " + Buffer.from(`admin:${credential}`).toString("base64"), Origin: origin,
-    } });
+    }, body });
   }
 
   async function rotate() {
     const response = await admin("/admin/token/rotate", "POST");
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
-    const match = /<code>([A-Za-z0-9_-]{43})<\/code>/.exec(await response.text());
-    assert(match, "admin can copy the generated token once");
+    const match = /id="access-code" value="([A-Za-z0-9_-]{43})"/.exec(await response.text());
+    assert(match, "admin can copy the generated token");
     return match[1]!;
   }
 
@@ -374,6 +374,8 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.equal((await fetch(base + "/admin")).status, 401);
   assert.equal((await admin("/admin", "GET", config.baseUrl, teamToken)).status, 401);
   assert.equal((await admin("/admin/token/rotate", "POST", "https://untrusted.example.invalid")).status, 403);
+  assert.equal((await admin("/admin/token/reveal", "POST", "https://untrusted.example.invalid")).status, 403);
+  assert.equal((await admin("/admin/token/reveal", "GET")).status, 404);
   assert(!(await (await admin("/admin")).text()).includes(teamToken));
 
   async function begin() {
@@ -396,9 +398,25 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   }
 
   const abandoned = await begin();
+  // A pre-upgrade code has only a digest. Saving its encrypted copy preserves its revision.
+  await pool.query("UPDATE enrollment_code SET credential_ciphertext=NULL WHERE singleton AND credential_digest=$1",
+    [digest(teamToken)]);
+  assert.equal((await admin("/admin/token/reveal", "POST")).status, 404);
+  assert.match(await (await admin("/admin")).text(), /Save existing access code/);
+  const save = (token: string) => admin("/admin/token/save", "POST", config.baseUrl, adminToken, new URLSearchParams({ token }));
+  assert.equal((await save(nonce())).status, 400);
+  assert.equal((await save(teamToken)).status, 200);
+  assert.equal((await request(abandoned.path, abandoned.credential)).status, 200);
+  const revealed = await admin("/admin/token/reveal", "POST");
+  assert.equal(revealed.status, 200);
+  assert.equal(revealed.headers.get("cache-control"), "no-store");
+  assert((await revealed.text()).includes(`id="access-code" value="${teamToken}"`));
   const oldToken = teamToken;
   teamToken = await rotate();
   assert(oldToken !== teamToken);
+  const replacement = await admin("/admin/token/reveal", "POST");
+  assert.equal(replacement.status, 200);
+  assert((await replacement.text()).includes(`id="access-code" value="${teamToken}"`));
   assert.equal((await request("/v1/connect-sessions", oldToken, "POST")).status, 401);
   assert.equal((await request(abandoned.path, abandoned.credential)).status, 404);
   assert.equal((await fetch(abandoned.callback)).status, 400);
@@ -913,6 +931,22 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.equal((await request(readerPath + "/notifications", reader.credential)).status, 401);
   assert.equal((await request(path, reader.credential)).status, 401);
   assert.equal((await json(await request(visitorConnection, visitorReader.credential))).status, "active");
-  assert((await (await admin("/admin")).text()).includes("disconnected"));
+  assert.match(await (await admin("/admin")).text(), /Disconnected/);
+
+  const newPassword = nonce().slice(0, 20) + " : 新密码";
+  const change = (current: string, next: string, confirm = next, origin = config.baseUrl, credential = adminToken) =>
+    admin("/admin/password", "POST", origin, credential, new URLSearchParams({ current, next, confirm }));
+  assert.equal((await change(adminToken, newPassword, newPassword, "https://untrusted.example.invalid")).status, 403);
+  assert.equal((await change(nonce(), newPassword)).status, 400);
+  assert.equal((await change(adminToken, newPassword, nonce())).status, 400);
+  const changed = await change(adminToken, newPassword);
+  assert.equal(changed.status, 200);
+  assert(!(await changed.text()).includes(newPassword));
+  assert.equal((await admin("/admin")).status, 401);
+  assert.equal((await admin("/admin", "GET", config.baseUrl, newPassword)).status, 200);
+  const nextPassword = nonce().slice(0, 24);
+  assert.equal((await change(newPassword, nextPassword, nextPassword, config.baseUrl, newPassword)).status, 200);
+  assert.equal((await admin("/admin", "GET", config.baseUrl, newPassword)).status, 401);
+  assert.equal((await admin("/admin", "GET", config.baseUrl, nextPassword)).status, 200);
   assert.ifError(fakeError);
 });

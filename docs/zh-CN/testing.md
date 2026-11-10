@@ -22,7 +22,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 | `PUBLIC_BASE_URL` | HTTPS origin，例如 `https://calendar.example.invalid` |
 | `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` | Web OAuth 客户端配置 |
 | `GABRIEL_DATA_KEY` | 32 个随机字节的无填充 base64url 编码，由密钥管理系统注入 |
-| `GABRIEL_ADMIN_TOKEN_DIGEST` | 管理员凭据字符串的 SHA-256 摘要，采用无填充 base64url。管理员凭据本身由密钥管理系统保存，格式为 32 个随机字节的无填充 base64url 编码 |
+| `GABRIEL_ADMIN_TOKEN_DIGEST` | 初始管理员凭据的 SHA-256 摘要，采用无填充 base64url。凭据由密钥管理系统保存，格式为 32 个随机字节的无填充 base64url 编码。首次在页面改密后，服务改用数据库中的加盐 scrypt 校验值 |
 | `HOST`、`PORT` | 默认 `127.0.0.1` 和 `8080` |
 | `GABRIEL_TICK_MS` | 工作循环间隔，默认 1,000 毫秒 |
 | `GABRIEL_CATCHUP_MS` | 定期增量补收间隔，默认 300,000 毫秒 |
@@ -30,11 +30,11 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 
 ## 接入码与连接管理
 
-1. 在服务的 HTTPS 地址打开 `/admin`。浏览器认证提示中，用户名填 `admin`，密码填密钥管理系统中与 `GABRIEL_ADMIN_TOKEN_DIGEST` 对应的管理员凭据。
-2. 点 **Create token**，把生成的共享接入码存入团队的密钥管理系统。管理页只在生成时显示原值。将 HTTPS 地址和接入码分发给同事。Google 项目仍处于 External / Testing 时，账号仍须加入 Google 测试用户名单。
+1. 在服务的 HTTPS 地址打开 `/admin`，用用户名 `admin` 和管理员密码登录。首次使用密钥管理系统中的初始管理员凭据。点 **Change password**，输入当前密码并设置自己的 16–128 字符密码。保存后用新密码登录。
+2. 点 **Create access code** 创建共享接入码，或点 **View and copy access code** 查看和复制当前码。升级前的接入码需要点 **Save existing access code** 并录入一次原值，服务验证后会加密保存，原码继续有效。通过团队的密钥管理系统将 HTTPS 地址和接入码分发给同事。Google 项目仍处于 External / Testing 时，账号仍须加入 Google 测试用户名单。
 3. 同事把地址填入 SDK 的 `baseUrl` / `base_url`，将共享码传给 `token`，在 SDK 打开的 Google 页面用自己的账号授权。SDK 拿到独立的 consumer grant，之后读写和接收 SSE 都用这份凭据。
 
-点 **Reset token** 可轮换共享码。旧码和它发起的未完成会话立即失效，已领取的 consumer grant 继续工作。管理页显示连接 ID、脱敏日历、状态和最近同步时间。对某条连接点 **Disconnect** 会解除绑定、撤销该连接的所有 consumer grant 并尝试停止 Google Watch。持有当前接入码的账号可以重新授权。若接入码泄露，先重置，再断开任何需要撤销的连接。
+点 **Replace access code** 并确认可轮换共享码。旧码和它发起的未完成会话立即失效，已领取的 consumer grant 继续工作。管理页显示连接 ID、脱敏日历、状态和最近同步时间。对某条连接点 **Disconnect** 并确认会解除绑定、撤销该连接的所有 consumer grant 并尝试停止 Google Watch。持有当前接入码的账号可以重新授权。若接入码泄露，先重置，再断开任何需要撤销的连接。
 
 ### 写入范围与升级
 

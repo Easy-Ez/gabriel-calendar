@@ -59,11 +59,33 @@ export class CalendarService {
 
   async rotateEnrollment() {
     const token = nonce();
+    const revision = randomUUID();
     await this.pool.query(
-      `INSERT INTO enrollment_code (singleton,revision,credential_digest) VALUES (true,$1,$2)
-       ON CONFLICT (singleton) DO UPDATE SET revision=excluded.revision,credential_digest=excluded.credential_digest,rotated_at=now()`,
-      [randomUUID(), digest(token)]);
+      `INSERT INTO enrollment_code (singleton,revision,credential_digest,credential_ciphertext) VALUES (true,$1,$2,$3)
+       ON CONFLICT (singleton) DO UPDATE SET revision=excluded.revision,credential_digest=excluded.credential_digest,
+         credential_ciphertext=excluded.credential_ciphertext,rotated_at=now()`,
+      [revision, digest(token), this.security.encrypt(`team-enrollment:${revision}`, token)]);
     return token;
+  }
+
+  async revealEnrollment() {
+    const { rows: [code] } = await this.pool.query<{ revision: string; credential_ciphertext: string | null }>(
+      "SELECT revision,credential_ciphertext FROM enrollment_code WHERE singleton");
+    if (!code?.credential_ciphertext) throw new ApiError("NOT_FOUND");
+    return this.security.decrypt(`team-enrollment:${code.revision}`, code.credential_ciphertext);
+  }
+
+  async saveEnrollment(token: string) {
+    const credentialDigest = digest(token);
+    const { rows: [code] } = await this.pool.query<{ revision: string }>(
+      "SELECT revision FROM enrollment_code WHERE singleton AND credential_digest=$1 AND credential_ciphertext IS NULL",
+      [credentialDigest]);
+    if (!code) return false;
+    const { rowCount } = await this.pool.query(
+      `UPDATE enrollment_code SET credential_ciphertext=$1
+       WHERE singleton AND revision=$2 AND credential_digest=$3 AND credential_ciphertext IS NULL`,
+      [this.security.encrypt(`team-enrollment:${code.revision}`, token), code.revision, credentialDigest]);
+    return rowCount === 1;
   }
 
   async administration(after: string) {
@@ -71,10 +93,11 @@ export class CalendarService {
       this.pool.query<Pick<Connection, "id" | "calendar_id" | "status" | "last_sync_at">>(
         `SELECT id,calendar_id,status,last_sync_at FROM connections
          WHERE ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT 51`, [after || null]),
-      this.pool.query<{ rotated_at: Date }>("SELECT rotated_at FROM enrollment_code WHERE singleton"),
+      this.pool.query<{ rotated_at: Date; can_reveal: boolean }>(
+        "SELECT rotated_at,credential_ciphertext IS NOT NULL AS can_reveal FROM enrollment_code WHERE singleton"),
     ]);
     return { connections: connections.slice(0, 50), next: connections.length > 50 ? connections[49]!.id : undefined,
-      rotatedAt: code?.rotated_at };
+      rotatedAt: code?.rotated_at, canReveal: code?.can_reveal ?? false };
   }
 
   async connect(token: string) {

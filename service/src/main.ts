@@ -10,7 +10,7 @@ import { CalendarService } from "./service.js";
 const { Pool } = pg;
 const migrations = ["001_initial.sql", "002_event_create.sql", "003_event_manage.sql", "004_event_guests.sql",
   "005_onboarding_timing.sql", "006_delivery_timing.sql", "007_reserved.sql", "008_consumer_write_defaults.sql",
-  "009_shared_enrollment.sql"];
+  "009_shared_enrollment.sql", "010_admin_settings.sql"];
 
 function required(name: string, max = 8192) {
   const value = process.env[name];

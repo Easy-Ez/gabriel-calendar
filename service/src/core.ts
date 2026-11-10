@@ -75,17 +75,17 @@ export class Security {
     }
     return match[1]!;
   }
-  encrypt(connection: string, value: string) {
+  encrypt(scope: string, value: string) {
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", this.encryptionKey, iv);
-    cipher.setAAD(Buffer.from(connection));
+    cipher.setAAD(Buffer.from(scope));
     const data = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
     return Buffer.concat([iv, cipher.getAuthTag(), data]).toString("base64url");
   }
-  decrypt(connection: string, value: string) {
+  decrypt(scope: string, value: string) {
     const data = Buffer.from(value, "base64url");
     const decipher = createDecipheriv("aes-256-gcm", this.encryptionKey, data.subarray(0, 12));
-    decipher.setAAD(Buffer.from(connection));
+    decipher.setAAD(Buffer.from(scope));
     decipher.setAuthTag(data.subarray(12, 28));
     return Buffer.concat([decipher.update(data.subarray(28)), decipher.final()]).toString("utf8");
   }
