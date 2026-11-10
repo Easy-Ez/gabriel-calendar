@@ -20,12 +20,7 @@ type Session = {
   id: string; owner_id: string; status: string; connection_id: string | null; expires_at: Date;
   callback_started_at: Date | null; callback_completed_at: Date | null;
 };
-type Consumer = {
-  id: string; connection_id: string; checkpoint: string; can_rsvp: boolean; can_create: boolean; can_manage: boolean;
-  can_invite: boolean;
-};
-type Grant = Pick<Consumer, "id" | "can_rsvp" | "can_create" | "can_manage" | "can_invite">;
-type Permissions = { canRsvp?: boolean; canCreate?: boolean; canManage?: boolean; canInvite?: boolean };
+type Consumer = { checkpoint: string };
 type CreateRequest = { event_id: string; request_digest: string; confirmed: boolean };
 
 function elapsed(start: Date | null, finish: Date | null) {
@@ -202,22 +197,16 @@ export class CalendarService {
     if (!this.owners.has(connection.owner_id)) throw new ApiError("FORBIDDEN");
   }
 
-  private permitsRsvp(connectionId: string) {
-    return this.config.rsvpEnabled && (this.config.rsvpConnections?.has(connectionId) ?? true) &&
-      (this.config.rsvpUntilMs === undefined || Date.now() < this.config.rsvpUntilMs);
-  }
-
   private async grant(bearer: string, connection: string, consumer?: string, db: Pool | PoolClient = this.pool) {
-    const { rows: [grant] } = await db.query<Grant>(
-      `SELECT id,can_rsvp,can_create,can_manage,can_invite FROM consumers WHERE connection_id=$1 AND grant_digest=$2 AND NOT revoked
+    const { rowCount } = await db.query(
+      `SELECT 1 FROM consumers WHERE connection_id=$1 AND grant_digest=$2 AND NOT revoked
        AND ($3::uuid IS NULL OR id=$3)`, [connection, digest(bearer), consumer ?? null]);
-    if (!grant) throw new ApiError("AUTH_REQUIRED");
-    return grant;
+    if (!rowCount) throw new ApiError("AUTH_REQUIRED");
   }
 
   async status(bearer: string, id: string) {
     const owner = this.config.projectSessions.get(digest(bearer));
-    const grant = owner ? undefined : await this.grant(bearer, id);
+    if (!owner) await this.grant(bearer, id);
     const connection = await this.connection(id);
     if (owner && owner !== connection.owner_id) throw new ApiError("NOT_FOUND");
     const { rows: [watch] } = await this.pool.query<{ expires: Date | null }>(
@@ -232,18 +221,12 @@ export class CalendarService {
       lastWebhookAt: connection.last_webhook_at,
       watchExpiresAt,
       onboarding: onboarding(connection, watchExpiresAt),
-      capabilities: connection.status === "active" ? [
-        "events.read",
-        ...(this.permitsRsvp(id) && (grant?.can_rsvp ?? true) ? ["events.rsvp"] : []),
-        ...(this.config.createSubjects?.has(connection.owner_id) && (grant?.can_create ?? true) ? ["events.create"] : []),
-        ...(this.config.manageSubjects?.has(connection.owner_id) && (grant?.can_manage ?? true)
-          ? ["events.update", "events.cancel"] : []),
-        ...(this.config.guestSubjects?.has(connection.owner_id) && (grant?.can_invite ?? true) ? ["events.invite"] : []),
-      ] : [],
+      capabilities: connection.status === "active" && this.owners.has(connection.owner_id)
+        ? ["events.read", "events.rsvp", "events.create", "events.update", "events.cancel"] : [],
     };
   }
 
-  async pair(owner: string, id: string, permissions: Permissions) {
+  async pair(owner: string, id: string) {
     const consumer = randomUUID();
     const credential = nonce();
     const db = await this.pool.connect();
@@ -255,12 +238,8 @@ export class CalendarService {
         this.active(connection);
         const expired = await this.expiredThrough(db, id, connection.pruned_through);
         await db.query(
-          `INSERT INTO consumers (id,connection_id,grant_digest,can_rsvp,checkpoint,can_create,can_manage,can_invite)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [consumer, id, digest(credential), permissions.canRsvp === true && this.permitsRsvp(id), expired,
-            permissions.canCreate === true && this.config.createSubjects?.has(owner) === true,
-            permissions.canManage === true && this.config.manageSubjects?.has(owner) === true,
-            permissions.canInvite === true && this.config.guestSubjects?.has(owner) === true]);
+          `INSERT INTO consumers (id,connection_id,grant_digest,checkpoint) VALUES ($1,$2,$3,$4)`,
+          [consumer, id, digest(credential), expired]);
         return { connectionId: id, consumerId: consumer, credential };
       });
     } finally {
@@ -440,11 +419,10 @@ export class CalendarService {
   async rsvp(bearer: string, id: string, calendar: string, event: string, status: Rsvp, version?: string) {
     await this.grant(bearer, id);
     const result = await this.exclusive(id, async db => {
-      const grant = await this.grant(bearer, id, undefined, db);
+      await this.grant(bearer, id, undefined, db);
       const connection = await this.connection(id, db);
       this.active(connection);
       if (calendar !== connection.calendar_id) throw new ApiError("NOT_FOUND");
-      if (!this.permitsRsvp(id) || !grant.can_rsvp) throw new ApiError("FORBIDDEN");
       try {
         return await this.withAccess(db, connection,
           access => this.google.rsvp(access, calendar, event, status, version));
@@ -460,19 +438,14 @@ export class CalendarService {
   }
 
   async create(bearer: string, id: string, calendar: string, key: string, input: CreateEvent) {
-    const grant = await this.grant(bearer, id);
-    if (!grant.can_create) throw new ApiError("FORBIDDEN");
+    await this.grant(bearer, id);
     const result = await this.exclusive(id, async db => {
-      const grant = await this.grant(bearer, id, undefined, db);
+      await this.grant(bearer, id, undefined, db);
       const connection = await this.connection(id, db);
       this.active(connection);
       if (calendar !== "primary" && calendar !== connection.calendar_id) throw new ApiError("NOT_FOUND");
-      if (!grant.can_create || !this.config.createSubjects?.has(connection.owner_id)) throw new ApiError("FORBIDDEN");
-      if (input.invitation) {
-        if (!grant.can_invite || !this.config.guestSubjects?.has(connection.owner_id)) throw new ApiError("FORBIDDEN");
-        if (input.invitation.guests.some(email => email.toLowerCase() === connection.calendar_id.toLowerCase())) {
-          throw new ApiError("INVALID_ARGUMENT");
-        }
+      if (input.invitation?.guests.some(email => email.toLowerCase() === connection.calendar_id.toLowerCase())) {
+        throw new ApiError("INVALID_ARGUMENT");
       }
       if (!connection.last_sync_at) throw new ApiError("SYNC_PENDING", 2);
 
@@ -505,19 +478,16 @@ export class CalendarService {
   }
 
   async manage(bearer: string, id: string, calendar: string, event: string, version: string, notify?: boolean, patch?: UpdateEvent) {
-    const grant = await this.grant(bearer, id);
-    if (!grant.can_manage) throw new ApiError("FORBIDDEN");
+    await this.grant(bearer, id);
     const result = await this.exclusive(id, async db => {
-      const grant = await this.grant(bearer, id, undefined, db);
+      await this.grant(bearer, id, undefined, db);
       const connection = await this.connection(id, db);
       this.active(connection);
       if (calendar !== connection.calendar_id) throw new ApiError("NOT_FOUND");
-      if (!grant.can_manage || !this.config.manageSubjects?.has(connection.owner_id)) throw new ApiError("FORBIDDEN");
       if (!connection.last_sync_at) throw new ApiError("SYNC_PENDING", 2);
       try {
-        const allowGuests = grant.can_invite && this.config.guestSubjects?.has(connection.owner_id) === true;
         return await this.withAccess(db, connection,
-          access => this.google.manage(access, calendar, event, version, { allowGuests, notify, patch }));
+          access => this.google.manage(access, calendar, event, version, { notify, patch }));
       } catch (error) {
         if (error instanceof GoogleError) throw providerError(error);
         throw error;

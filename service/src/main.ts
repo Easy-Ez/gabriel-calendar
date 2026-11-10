@@ -2,14 +2,14 @@ import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
-import { digest, log, opaque, record, subjectId, text, transaction, uuid } from "./core.js";
+import { digest, log, opaque, record, subjectId, text, transaction } from "./core.js";
 import type { Settings } from "./core.js";
 import { httpServer } from "./http.js";
 import { CalendarService } from "./service.js";
 
 const { Pool } = pg;
 const migrations = ["001_initial.sql", "002_event_create.sql", "003_event_manage.sql", "004_event_guests.sql",
-  "005_onboarding_timing.sql", "006_delivery_timing.sql", "007_reserved.sql"];
+  "005_onboarding_timing.sql", "006_delivery_timing.sql", "007_reserved.sql", "008_consumer_write_defaults.sql"];
 
 function required(name: string, max = 8192) {
   const value = process.env[name];
@@ -58,33 +58,11 @@ function settings(): Settings {
       projectSessions.set(verifier, subject);
     }
   }
-  const rsvp = process.env.GABRIEL_ENABLE_RSVP ?? "false";
-  if (rsvp !== "true" && rsvp !== "false") throw new Error("GABRIEL_ENABLE_RSVP");
-  const rawRsvpConnections = process.env.GABRIEL_RSVP_CONNECTIONS;
-  let rsvpConnections: Set<string> | undefined;
-  if (rawRsvpConnections !== undefined) {
-    const configured: unknown = JSON.parse(required("GABRIEL_RSVP_CONNECTIONS", 5000));
-    if (!Array.isArray(configured) || configured.length > 100 ||
-        configured.some(id => typeof id !== "string" || id.length !== 36 || !uuid.test(id))) {
-      throw new Error("GABRIEL_RSVP_CONNECTIONS");
-    }
-    rsvpConnections = new Set(configured);
-  }
-  const subjects = new Set(projectSessions.values());
-  const allowedSubjects = (name: string) => {
-    const allowed = new Set((process.env[name] || "").split(",").filter(Boolean));
-    if ([...allowed].some(subject => !subjects.has(subject))) throw new Error(name);
-    return allowed;
-  };
   return {
     baseUrl: base.origin,
     googleClientId: required("GOOGLE_CLIENT_ID", 512),
     googleClientSecret: required("GOOGLE_CLIENT_SECRET", 512),
-    dataKey, projectSessions, rsvpEnabled: rsvp === "true", rsvpConnections,
-    createSubjects: allowedSubjects("GABRIEL_CREATE_SUBJECTS"),
-    manageSubjects: allowedSubjects("GABRIEL_MANAGE_SUBJECTS"),
-    guestSubjects: allowedSubjects("GABRIEL_GUEST_SUBJECTS"),
-    rsvpUntilMs: numberSetting("GABRIEL_RSVP_UNTIL_MS", 0, 1, Number.MAX_SAFE_INTEGER) || undefined,
+    dataKey, projectSessions,
     tickMs: numberSetting("GABRIEL_TICK_MS", 1000, 250, 60_000),
     catchupMs: numberSetting("GABRIEL_CATCHUP_MS", 300_000, 10_000, 3_600_000),
     retentionMs: numberSetting("GABRIEL_RETENTION_MS", 7 * 86400_000, 60_000, 30 * 86400_000),

@@ -294,12 +294,7 @@
         "connectionId": "10000000-0000-4000-8000-000000000001",
         "consumerId": "10000000-0000-4000-8000-000000000002"
       },
-      "body": {
-        "canRsvp": true,
-        "canCreate": true,
-        "canManage": true,
-        "canInvite": true
-      },
+      "body": {},
       "project": true,
       "grant": true
     },

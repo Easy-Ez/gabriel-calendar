@@ -113,7 +113,7 @@ class Conformance(unittest.IsolatedAsyncioTestCase):
     async def test_lifecycle(self):
         with harness(self, FIXTURE["steps"]) as (base, project, grant):
             client = await CalendarClient.connect(
-                base_url=base, get_project_credential=lambda: project, can_rsvp=True, can_create=True, can_manage=True, can_invite=True,
+                base_url=base, get_project_credential=lambda: project,
                 open_browser=lambda url: self.assertEqual(url, "https://consent.example.invalid/authorize"),
                 save_grant=lambda saved: self.assertTrue(saved.credential == grant),
             )

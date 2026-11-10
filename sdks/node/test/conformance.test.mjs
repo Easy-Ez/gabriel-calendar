@@ -70,7 +70,7 @@ async function harness(t, steps) {
 test("shared SSE lifecycle, failed handler, lost ack, reconnect, gaps and writes", { timeout: 8000 }, async t => {
   const { baseUrl, project, grant } = await harness(t, fixture.steps);
   const client = await CalendarClient.connect({
-    baseUrl, getProjectCredential: () => project, canRsvp: true, canCreate: true, canManage: true, canInvite: true,
+    baseUrl, getProjectCredential: () => project,
     openBrowser: url => assert.equal(url, "https://consent.example.invalid/authorize"),
     saveGrant: saved => assert(saved.credential === grant),
   });

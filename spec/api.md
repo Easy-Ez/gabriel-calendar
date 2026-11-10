@@ -4,7 +4,7 @@ The implemented MVP contract is version 1. One deployment serves one test projec
 
 ## HTTP endpoints
 
-Use HTTPS and `Authorization: Bearer <credential>` on authenticated routes. Project sessions authorize OAuth, pairing and disconnect. Consumer grants authorize delivery, reads and explicitly granted writes. The service checks the connection and consumer binding. The `X-Request-Id` header accompanies every response, and responses use `Cache-Control: no-store`.
+Use HTTPS and `Authorization: Bearer <credential>` on authenticated routes. Project sessions authorize OAuth, pairing and disconnect. A consumer grant for an active, admitted connection authorizes delivery, reads and the supported writes on its linked primary calendar. The service checks the connection and consumer binding. The `X-Request-Id` header accompanies every response, and responses use `Cache-Control: no-store`.
 
 | Method and path | Authorization | Success |
 | --- | --- | --- |
@@ -15,17 +15,17 @@ Use HTTPS and `Authorization: Bearer <credential>` on authenticated routes. Proj
 | `POST /v1/google/webhook` | Google channel headers | `204` for well-formed notifications, including duplicates and unmatched channels |
 | `GET /v1/connections/{connectionId}` | Owner project session or bound consumer grant | `200` with `connectionId`, `status`, `watchedCalendars`, `lastSyncAt`, `lastWebhookAt`, `watchExpiresAt`, `capabilities` and `onboarding` |
 | `POST /v1/connections/{connectionId}/disconnect` | Owner project session | `204` after local revocation. Empty request body |
-| `POST /v1/connections/{connectionId}/consumers` | Owner project session | `201` with `connectionId`, `consumerId` and `credential`, returned once. The JSON body accepts `canRsvp`, `canCreate`, `canManage` and `canInvite`, all default false |
+| `POST /v1/connections/{connectionId}/consumers` | Owner project session | `201` with `connectionId`, `consumerId` and `credential`, returned once. Send an empty JSON object `{}` |
 | `GET /v1/connections/{connectionId}/consumers/{consumerId}/stream` | Matching consumer grant | `200 text/event-stream`. The stream starts with `ready` and delivers ordered `notification` events |
 | `GET /v1/connections/{connectionId}/consumers/{consumerId}/notifications?wait=25` | Matching consumer grant | Legacy HTTP long poll. `200` with `{ "notifications": [] }` or up to 25 ordered notifications. `wait` accepts 0–25 seconds and defaults to 0 |
 | `POST /v1/connections/{connectionId}/consumers/{consumerId}/ack` | Matching consumer grant | `204` after advancing the contiguous processed prefix. The JSON body contains the last processed `cursor` |
 | `GET /v1/connections/{connectionId}/calendars/{calendarId}/events?rsvp=needsAction` | Bound consumer grant | `200` with `events` and optional `nextPageCursor`. Accepts `primary` or the canonical calendar ID. Use `pageCursor` and `limit` (1–100, default 50) to paginate |
-| `POST /v1/connections/{connectionId}/calendars/{calendarId}/events` | Bound consumer grant with create capability | `201` with the Google-confirmed event. Accepts `primary` or the canonical ID of the connected primary calendar |
-| `PATCH /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}` | Bound consumer grant with update capability | `200` with the updated Google event snapshot and its new version |
-| `POST /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/cancel` | Bound consumer grant with cancel capability | `200` with the event reference and `status: "cancelled"` after Google confirms deletion |
-| `PUT /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/rsvp` | Bound consumer grant with RSVP capability | `200` with Google's confirmed event snapshot. The JSON body contains only `status`, one of `accepted`, `tentative` or `declined`. Send the canonical calendar ID and optionally pass the event's `version` as `If-Match` |
+| `POST /v1/connections/{connectionId}/calendars/{calendarId}/events` | Bound consumer grant | `201` with the Google-confirmed event. Accepts `primary` or the canonical ID of the connected primary calendar |
+| `PATCH /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}` | Bound consumer grant | `200` with the updated Google event snapshot and its new version |
+| `POST /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/cancel` | Bound consumer grant | `200` with the event reference and `status: "cancelled"` after Google confirms deletion |
+| `PUT /v1/connections/{connectionId}/calendars/{calendarId}/events/{eventId}/rsvp` | Bound consumer grant | `200` with Google's confirmed event snapshot. The JSON body contains only `status`, one of `accepted`, `tentative` or `declined`. Send the canonical calendar ID and optionally pass the event's `version` as `If-Match` |
 
-Connection states are `active`, `auth_required` and `disconnected`. The timing fields are nullable RFC 3339 timestamps. Capabilities are `events.read`, `events.rsvp`, `events.create`, `events.update`, `events.cancel` and `events.invite`. When the initial baseline is pending, listing invitations, creating, updating and cancelling events return `SYNC_PENDING`. Reauthorization with the same subject and calendar preserves the connection ID and any unrevoked consumer. Disconnect the current connection before linking a different Google account. An active or authorization-required connection reserves its calendar to its project subject. Pairing an additional consumer starts it at the beginning of the retained notification window.
+Connection states are `active`, `auth_required` and `disconnected`. The timing fields are nullable RFC 3339 timestamps. For an active, admitted connection, `capabilities` reports `events.read`, `events.rsvp`, `events.create`, `events.update` and `events.cancel`. When the initial baseline is pending, listing invitations, creating, updating and cancelling events return `SYNC_PENDING`. Reauthorization with the same subject and calendar preserves the connection ID and any unrevoked consumer. Disconnect the current connection before linking a different Google account. An active or authorization-required connection reserves its calendar to its project subject. Pairing an additional consumer starts it at the beginning of the retained notification window.
 
 ### Connection progress and timings
 
@@ -49,15 +49,15 @@ Durations are nonnegative integer milliseconds or `null` when unavailable. In pa
 
 Successful create, update and cancel responses can include `X-Gabriel-Google-Confirmed-At`, the service clock in Unix milliseconds when the direct Google write response was received and decoded. A create confirmed by retrieving an already-existing event has no timing header. The response body remains the event snapshot.
 
-Send a nonblank `title` of up to 512 UTF-16 code units, `start` and `end` as RFC 3339 date-times with an explicit offset and up to millisecond precision, and optionally `showAs` (`busy` by default, or `free`). The end must be after the start. This operation creates a single timed event without reminders. It accepts an optional `guests` array of up to 12 distinct ASCII email addresses. A nonempty array requires a boolean `notifyGuests` and the `events.invite` capability in addition to `events.create`.
+Send a nonblank `title` of up to 512 UTF-16 code units, `start` and `end` as RFC 3339 date-times with an explicit offset and up to millisecond precision, and optionally `showAs` (`busy` by default, or `free`). The end must be after the start. This operation creates a single timed event without reminders. It accepts an optional `guests` array of up to 12 distinct ASCII email addresses. A nonempty array requires a boolean `notifyGuests`.
 
-Send an `Idempotency-Key` header with 1–128 ASCII letters, digits, underscores or hyphens. Use a fresh key for each intended event and reuse that key and input after a timeout or `OUTCOME_UNKNOWN`. The key is scoped to the connection across its consumers and calendar aliases. Changed input for a used key returns `IDEMPOTENCY_CONFLICT`. A successful retry returns the same Google event reference and its current snapshot. A previously confirmed event that Google reports as removed returns `NOT_FOUND`. Creation is disabled unless the deployment permits the project subject and the consumer was paired with `canCreate: true`.
+Send an `Idempotency-Key` header with 1–128 ASCII letters, digits, underscores or hyphens. Use a fresh key for each intended event and reuse that key and input after a timeout or `OUTCOME_UNKNOWN`. The key is scoped to the connection across its consumers and calendar aliases. Changed input for a used key returns `IDEMPOTENCY_CONFLICT`. A successful retry returns the same Google event reference and its current snapshot. A previously confirmed event that Google reports as removed returns `NOT_FOUND`.
 
 ### Updating and cancelling events
 
 Use the canonical reference and current `version` from a Google-confirmed snapshot, such as a create response or a notification. Send the version as `If-Match`. A stale version returns `VERSION_CONFLICT`; an event that Google reports as removed returns `NOT_FOUND`. An uncertain provider write returns `OUTCOME_UNKNOWN`. Check the latest observed state before sending another write.
 
-Update accepts a new `title`, a pair of `start` and `end`, or both. These fields follow the same validation as creation. Both operations require a primary-calendar timed single event organized by the linked account, an enabled deployment subject and a consumer paired with `canManage: true`. For an event with guests, both operations additionally require `events.invite` and a boolean `notifyGuests` in the body. For an event without guests, the cancel body can be empty JSON `{}`. Update preserves the guest list.
+Update accepts a new `title`, a pair of `start` and `end`, or both. These fields follow the same validation as creation. Both operations require a primary-calendar timed single event organized by the linked account. For an event with guests, both operations require a boolean `notifyGuests` in the body. For an event without guests, the cancel body can be empty JSON `{}`. Update preserves the guest list.
 
 For operations involving guests, `notifyGuests: true` requests Google's `sendUpdates=all`; `false` requests `sendUpdates=none`. The latter can affect propagation to guest calendars. Google controls email delivery and whether an invitation appears in a guest's calendar. [Google event insertion](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert) · [Guest calendar settings](https://developers.google.com/workspace/calendar/api/concepts/inviting-attendees-to-events)
 
@@ -104,11 +104,11 @@ Errors use `{ "error": { "code": "...", "message": "..." }, "requestId": "..." }
 | Cancel an event | `await client.events.cancel(ref, { ifMatch })` | `await client.events.cancel(ref, if_match=version)` |
 | Set RSVP | `await client.events.rsvp(ref, status, { ifMatch })` | `await client.events.rsvp(ref, status, if_match=...)` |
 
-`connect()` takes an HTTPS origin and a project credential supplier. An optional browser callback supports headless consent. The default uses the system browser on macOS and Linux in Node.js, and Python's `webbrowser` module in Python. Pass `canRsvp` or `can_rsvp` when pairing a consumer that needs to RSVP. The optional `saveGrant` or `save_grant` callback can save the returned grant to an approved secret store. Construct a client with that grant's connection ID, consumer ID and credential supplier to resume in a new process.
+`connect()` takes an HTTPS origin and a project credential supplier. An optional browser callback supports headless consent. The default uses the system browser on macOS and Linux in Node.js, and Python's `webbrowser` module in Python. The optional `saveGrant` or `save_grant` callback can save the returned grant to an approved secret store. Construct a client with that grant's connection ID, consumer ID and credential supplier to resume in a new process.
 
-`start()` waits for the SSE `ready` frame. `stop()` closes the stream and drains the current item up to the configured deadline. Query and writes remain callable with the listener stopped. Pass `canCreate` or `can_create` when pairing a creator and `canManage` or `can_manage` for updates and cancellation. Errors are typed `CalendarError` instances with `code`, optional HTTP status, request ID and retry hint. Python exposes attributes and changed-field names in snake_case. Event types, response values and error codes are shared across languages.
+`start()` waits for the SSE `ready` frame. `stop()` closes the stream and drains the current item up to the configured deadline. Queries and writes remain callable with the listener stopped. Errors are typed `CalendarError` instances with `code`, optional HTTP status, request ID and retry hint. Python exposes attributes and changed-field names in snake_case. Event types, response values and error codes are shared across languages.
 
-For guest events, pass `guests` as part of the create input and choose `notifyGuests` in the Node.js options or `notify_guests` in Python for each write. Pair a guest-enabled consumer with `canInvite` or `can_invite` in addition to the corresponding create or manage permission.
+For guest events, pass `guests` as part of the create input. Set `notifyGuests` in Node.js or `notify_guests` in Python to `true` or `false` for every create, update or cancel involving guests.
 
 Calendar selection, calendar management, general event queries and editing the guest list of an existing event remain in the later design scope.
 
@@ -125,7 +125,6 @@ const client = await CalendarClient.connect({
   baseUrl: "https://calendar.example.invalid",
   getProjectCredential,
   saveGrant,
-  canRsvp: true,
 });
 
 client.on("invitation.received", onInvitation);
@@ -149,7 +148,6 @@ client = await CalendarClient.connect(
     base_url="https://calendar.example.invalid",
     get_project_credential=get_project_credential,
     save_grant=save_grant,
-    can_rsvp=True,
 )
 client.on("invitation.received", on_invitation)
 

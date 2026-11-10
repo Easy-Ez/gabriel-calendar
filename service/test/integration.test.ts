@@ -47,7 +47,7 @@ test("service CLI migrates and serves readiness", { skip: !process.env.GABRIEL_T
     GOOGLE_CLIENT_ID: "synthetic-web-client", GOOGLE_CLIENT_SECRET: nonce(), GABRIEL_DATA_KEY: nonce(),
     GABRIEL_PROJECT_SESSIONS: JSON.stringify({ guest: nonce() }),
     GABRIEL_PROJECT_SESSION_DIGESTS: JSON.stringify({ visitor: digest(testSession) }),
-    GABRIEL_ENABLE_RSVP: "false", HOST: "127.0.0.1",
+    HOST: "127.0.0.1",
   };
   const args = [decodeURIComponent(main.pathname)];
   const migration = spawn(process.execPath, [...args, "migrate"], { env, stdio: "ignore" });
@@ -107,13 +107,10 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   const access = nonce();
   const refresh = nonce();
   const code = nonce();
-  const writableConnections = new Set<string>();
   const config: Settings = {
     baseUrl: "https://calendar.example.invalid", googleClientId: "synthetic-web-client", googleClientSecret: nonce(),
     dataKey: randomBytes(32), projectSessions: new Map([[digest(owner), "guest"], [digest(outsider), "other"],
       [digest(visitor), "visitor"]]),
-    rsvpEnabled: true, rsvpConnections: writableConnections, createSubjects: new Set(["guest"]), manageSubjects: new Set(["guest"]),
-    guestSubjects: new Set(["guest"]),
     tickMs: 5, catchupMs: 10_000, retentionMs: 60_000, renewLeadMs: 60_000,
   };
   const live = new Map([["baseline", invited("baseline")]]);
@@ -408,13 +405,13 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   authorizedCalendar = calendar;
   const path = "/v1/connections/" + connectionId;
   assert.equal((await request(path, outsider)).status, 404);
-  const deniedWriter = await json(await request(path + "/consumers", owner, "POST", { canRsvp: true }), 201);
-  assert.deepEqual((await json(await request(path, deniedWriter.credential))).capabilities, ["events.read"]);
-  writableConnections.add(connectionId);
-  const reader = await json(await request(path + "/consumers", owner, "POST", { canRsvp: true }), 201);
-  const readOnly = await json(await request(path + "/consumers", owner, "POST", {}), 201);
+  const reader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
+  const secondReader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
+  const capabilities = ["events.read", "events.rsvp", "events.create", "events.update", "events.cancel"];
+  assert.deepEqual((await json(await request(path, reader.credential))).capabilities, capabilities);
+  assert.deepEqual((await json(await request(path, secondReader.credential))).capabilities, capabilities);
   const readerPath = path + "/consumers/" + reader.consumerId;
-  const readOnlyPath = path + "/consumers/" + readOnly.consumerId;
+  const secondReaderPath = path + "/consumers/" + secondReader.consumerId;
   const streamReader = await json(await request(path + "/consumers", owner, "POST", {}), 201);
   const streamPath = path + "/consumers/" + streamReader.consumerId;
   async function openStream(readerEndpoint = streamPath, credential = streamReader.credential) {
@@ -547,17 +544,11 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.equal(page.events[0].ref.eventId, "baseline");
   assert.equal((await json(await request(invitations + "&pageCursor=" + page.nextPageCursor, reader.credential)))
     .events[0].ref.eventId, "newinvite");
-  assert.equal((await request(readOnlyPath + "/ack", readOnly.credential, "POST", { cursor: notice.cursor })).status, 400);
+  assert.equal((await request(secondReaderPath + "/ack", secondReader.credential, "POST", { cursor: notice.cursor })).status, 400);
   assert.equal((await ack(notice.cursor)).status, 204);
   assert.equal((await ack(notice.cursor)).status, 204);
   assert.deepEqual(await poll(), []);
-  assert.equal((await request(rsvp, readOnly.credential, "PUT", { status: "tentative" })).status, 403);
-  writableConnections.delete(connectionId);
-  assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative" })).status, 403);
-  writableConnections.add(connectionId);
-  config.rsvpUntilMs = Date.now() - 1;
-  assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative" })).status, 403);
-  config.rsvpUntilMs = undefined;
+  assert.equal((await request(rsvp, owner, "PUT", { status: "tentative" })).status, 401);
   assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative", attendee: "other@example.invalid" })).status, 400);
   assert.equal((await request(rsvp, reader.credential, "PUT", { status: "tentative" }, { "If-Match": '"stale"' })).status, 409);
   patchStatus = 503;
@@ -634,38 +625,35 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.deepEqual((await json(await request(invitations, reader.credential))).events.map(
     (item: { ref: { eventId: string } }) => item.ref.eventId), ["anotherinvite"]);
 
-  const creator = await json(await request(path + "/consumers", owner, "POST", { canCreate: true }), 201);
   const createPath = path + "/calendars/primary/events";
   const canonicalPath = path + "/calendars/" + encodeURIComponent(calendar) + "/events";
   const input = { title: "Synthetic SDK creation", start: "2030-01-03T12:00:00+08:00",
     end: "2030-01-03T12:15:00+08:00", showAs: "free" };
   const createHeaders = { "Idempotency-Key": "synthetic-key" };
-  assert((await json(await request(path, creator.credential))).capabilities.includes("events.create"));
-  assert.equal((await request(createPath, reader.credential, "POST", input, createHeaders)).status, 403);
   assert.equal((await request(createPath, owner, "POST", input, createHeaders)).status, 401);
-  assert.equal((await request(createPath.replace("/primary/", "/other/"), creator.credential, "POST", input, createHeaders)).status, 404);
-  assert.equal((await request(createPath, creator.credential, "POST", input)).status, 400);
+  assert.equal((await request(createPath.replace("/primary/", "/other/"), reader.credential, "POST", input, createHeaders)).status, 404);
+  assert.equal((await request(createPath, reader.credential, "POST", input)).status, 400);
   for (const invalid of [{ attendees: [] }, { recurrence: [] }, { start: "2030-02-30T12:00:00Z" },
     { end: input.start }, { start: "2030-01-03T24:00:00Z" }]) {
-    assert.equal((await request(createPath, creator.credential, "POST", { ...input, ...invalid }, createHeaders)).status, 400);
+    assert.equal((await request(createPath, reader.credential, "POST", { ...input, ...invalid }, createHeaders)).status, 400);
   }
   assert.equal(createCalls, 0);
   const createStream = await openStream(readerPath, reader.credential);
   assert.equal((await createStream.next()).event, "ready");
   const [created, retried] = await Promise.all([createPath, canonicalPath].map(async endpoint =>
-    json(await request(endpoint, creator.credential, "POST", input, createHeaders), 201)));
+    json(await request(endpoint, reader.credential, "POST", input, createHeaders), 201)));
   assert.deepEqual(created, retried);
   assert.equal(created.title, input.title);
   assert.equal(created.start.dateTime, "2030-01-03T04:00:00.000Z");
   assert.equal(createCalls, 1);
-  assert.equal((await json(await request(createPath, creator.credential, "POST",
+  assert.equal((await json(await request(createPath, reader.credential, "POST",
     { ...input, title: "Other request" }, createHeaders), 409)).error.code, "IDEMPOTENCY_CONFLICT");
   failAfterCreate = failCreatedLookup = true;
   const uncertainHeaders = { "Idempotency-Key": "synthetic-uncertain" };
-  assert.equal((await json(await request(createPath, creator.credential, "POST", input, uncertainHeaders), 502)).error.code,
+  assert.equal((await json(await request(createPath, reader.credential, "POST", input, uncertainHeaders), 502)).error.code,
     "OUTCOME_UNKNOWN");
   failAfterCreate = failCreatedLookup = false;
-  const recoveredResponse = await request(createPath, creator.credential, "POST", input, uncertainHeaders);
+  const recoveredResponse = await request(createPath, reader.credential, "POST", input, uncertainHeaders);
   assert.equal(recoveredResponse.headers.get("x-gabriel-google-confirmed-at"), null);
   const recovered = await json(recoveredResponse, 201);
   assert.notEqual(recovered.ref.eventId, created.ref.eventId);
@@ -681,40 +669,34 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert(validate(recoveredNotice.data), JSON.stringify(validate.errors));
   assert.equal((await ack(recoveredCursor)).status, 204);
 
-  const manager = await json(await request(path + "/consumers", owner, "POST", { canManage: true }), 201);
-  assert.deepEqual((await json(await request(path, manager.credential))).capabilities,
-    ["events.read", "events.update", "events.cancel"]);
   const managed = canonicalPath + "/" + created.ref.eventId;
   const update = { start: "2030-01-03T12:15:00+08:00", end: "2030-01-03T12:30:00+08:00" };
   const previous = { "If-Match": created.version };
-  assert.equal((await request(managed, creator.credential, "PATCH", update, previous)).status, 403);
-  assert.equal((await request(managed + "/cancel", creator.credential, "POST", {}, previous)).status, 403);
-  assert.equal((await request(managed.replace(encodeURIComponent(calendar), "primary"), manager.credential,
+  assert.equal((await request(managed.replace(encodeURIComponent(calendar), "primary"), reader.credential,
     "PATCH", update, previous)).status, 404);
-  assert.equal((await request(managed, manager.credential, "PATCH", update)).status, 400);
+  assert.equal((await request(managed, reader.credential, "PATCH", update)).status, 400);
   for (const invalid of [{}, { start: update.start }, { ...update, attendees: [] }, { title: "" }]) {
-    assert.equal((await request(managed, manager.credential, "PATCH", invalid, previous)).status, 400);
+    assert.equal((await request(managed, reader.credential, "PATCH", invalid, previous)).status, 400);
   }
-  assert.equal((await request(canonicalPath + "/anotherinvite/cancel", manager.credential, "POST", {}, previous)).status, 403);
+  assert.equal((await request(canonicalPath + "/anotherinvite/cancel", reader.credential, "POST", {}, previous)).status, 403);
   const original = live.get(created.ref.eventId)!;
-  for (const blocked of [{ recurringEventId: "series" }, { eventType: "focusTime" }, { attendeesOmitted: true },
-    { attendees: [{ email: "guest-two@example.invalid", responseStatus: "accepted" }] }]) {
+  for (const blocked of [{ recurringEventId: "series" }, { eventType: "focusTime" }, { attendeesOmitted: true }]) {
     live.set(original.id, { ...original, ...blocked });
-    assert.equal((await request(managed, manager.credential, "PATCH", update, previous)).status, 403);
-    assert.equal((await request(managed + "/cancel", manager.credential, "POST", {}, previous)).status, 403);
+    assert.equal((await request(managed, reader.credential, "PATCH", update, previous)).status, 403);
+    assert.equal((await request(managed + "/cancel", reader.credential, "POST", {}, previous)).status, 403);
   }
   live.set(original.id, original);
-  assert.equal((await json(await request(managed, manager.credential, "PATCH", update,
+  assert.equal((await json(await request(managed, reader.credential, "PATCH", update,
     { "If-Match": '"stale"' }), 409)).error.code, "VERSION_CONFLICT");
   assert.equal(manageCalls, 0);
   manageStatus = 412;
-  assert.equal((await json(await request(managed, manager.credential, "PATCH", update, previous), 409)).error.code,
+  assert.equal((await json(await request(managed, reader.credential, "PATCH", update, previous), 409)).error.code,
     "VERSION_CONFLICT");
   manageStatus = 503;
-  assert.equal((await json(await request(managed + "/cancel", manager.credential, "POST", {}, previous), 502)).error.code,
+  assert.equal((await json(await request(managed + "/cancel", reader.credential, "POST", {}, previous), 502)).error.code,
     "OUTCOME_UNKNOWN");
   manageStatus = 200;
-  const rescheduled = await json(await request(managed, manager.credential, "PATCH", update, previous));
+  const rescheduled = await json(await request(managed, reader.credential, "PATCH", update, previous));
   assert.equal(rescheduled.start.dateTime, "2030-01-03T04:15:00.000Z");
   assert.equal(rescheduled.end.dateTime, "2030-01-03T04:30:00.000Z");
   assert.notEqual(rescheduled.version, created.version);
@@ -725,11 +707,11 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   assert.deepEqual(movedNotice.ref, created.ref);
   assert.deepEqual(movedNotice.changedFields, ["start", "end"]);
   assert.equal((await ack(movedNotice.cursor)).status, 204);
-  assert.equal((await request(managed + "/cancel", manager.credential, "POST", {}, previous)).status, 409);
+  assert.equal((await request(managed + "/cancel", reader.credential, "POST", {}, previous)).status, 409);
   const currentVersion = { "If-Match": rescheduled.version };
-  assert.deepEqual(await json(await request(managed + "/cancel", manager.credential, "POST", {}, currentVersion)),
+  assert.deepEqual(await json(await request(managed + "/cancel", reader.credential, "POST", {}, currentVersion)),
     { ref: created.ref, status: "cancelled" });
-  assert.equal((await request(managed + "/cancel", manager.credential, "POST", {}, currentVersion)).status, 404);
+  assert.equal((await request(managed + "/cancel", reader.credential, "POST", {}, currentVersion)).status, 404);
   await push(watchRecords[1]!, 6);
   await service.tick();
   const removedNotice = (await createStream.next()).data;
@@ -762,21 +744,17 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   await service.tick();
   const visitorStream = await openStream(visitorReaderPath, visitorReader.credential);
   assert.equal((await visitorStream.next()).event, "ready");
-  const writer = await json(await request(path + "/consumers", owner, "POST", {
-    canCreate: true, canManage: true, canInvite: true,
-  }), 201);
-  assert((await json(await request(path, writer.credential))).capabilities.includes("events.invite"));
   const guests = [visitorCalendar];
   const invite = { ...input, guests, notifyGuests: true };
   const inviteKey = { "Idempotency-Key": "synthetic-guest-invite" };
-  assert.equal((await request(createPath, creator.credential, "POST", invite, inviteKey)).status, 403);
+  assert.equal((await request(createPath, visitorReader.credential, "POST", invite, inviteKey)).status, 401);
   for (const invalid of [{ guests }, { ...invite, guests: ["invalid@example.invalid\n"] },
     { ...invite, guests: [visitorCalendar, visitorCalendar.toUpperCase()] }, { ...invite, guests: [calendar] },
     { ...invite, notifyGuests: "yes" }]) {
-    assert.equal((await request(createPath, writer.credential, "POST", { ...input, ...invalid }, inviteKey)).status, 400);
+    assert.equal((await request(createPath, reader.credential, "POST", { ...input, ...invalid }, inviteKey)).status, 400);
   }
   const readsBeforeInvite = visitorListCalls;
-  const guestEvent = await directWrite(request(createPath, writer.credential, "POST", invite, inviteKey), 201);
+  const guestEvent = await directWrite(request(createPath, reader.credential, "POST", invite, inviteKey), 201);
   const organizerCopy = await google.readCopy(access, calendar, guestEvent.ref.eventId, AbortSignal.timeout(1000));
   assert(organizerCopy?.iCalUid);
   hideVisitorLookup = true;
@@ -790,16 +768,16 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
     visibility.firstVisibleAtMs >= visibility.lastAbsentAtMs);
   const guestCopyId = visibility.value?.event.ref.eventId;
   assert.equal(guestCopyId, "copy" + guestEvent.ref.eventId);
-  const repeated = await request(createPath, writer.credential, "POST", invite, inviteKey);
+  const repeated = await request(createPath, reader.credential, "POST", invite, inviteKey);
   assert.equal(repeated.headers.get("x-gabriel-google-confirmed-at"), null);
   assert.deepEqual(await json(repeated, 201), guestEvent);
-  assert.equal((await json(await request(createPath, writer.credential, "POST", { ...invite, notifyGuests: false },
+  assert.equal((await json(await request(createPath, reader.credential, "POST", { ...invite, notifyGuests: false },
     inviteKey), 409)).error.code, "IDEMPOTENCY_CONFLICT");
   const guestPath = canonicalPath + "/" + guestEvent.ref.eventId;
   const guestVersion = { "If-Match": guestEvent.version };
-  assert.equal((await request(guestPath, manager.credential, "PATCH", { ...update, notifyGuests: true }, guestVersion)).status, 403);
-  assert.equal((await request(guestPath, writer.credential, "PATCH", update, guestVersion)).status, 400);
-  assert.equal((await request(guestPath + "/cancel", writer.credential, "POST", {}, guestVersion)).status, 400);
+  assert.equal((await request(guestPath, visitorReader.credential, "PATCH", { ...update, notifyGuests: true }, guestVersion)).status, 401);
+  assert.equal((await request(guestPath, reader.credential, "PATCH", update, guestVersion)).status, 400);
+  assert.equal((await request(guestPath + "/cancel", reader.credential, "POST", {}, guestVersion)).status, 400);
   const guestNotice = async (message: number, type: string) => {
     await push(visitorWatch, message);
     await service.tick();
@@ -819,37 +797,37 @@ test("Google HTTP simulation with PostgreSQL", { skip: !process.env.GABRIEL_TEST
   await service.tick();
   assert.equal(visitorListCalls, readsBeforeInvite);
   await guestNotice(2, "invitation.received");
-  const quietMove = await json(await request(guestPath, writer.credential, "PATCH",
+  const quietMove = await json(await request(guestPath, reader.credential, "PATCH",
     { ...update, notifyGuests: false }, guestVersion));
-  const guestMove = await directWrite(request(guestPath, writer.credential, "PATCH", {
+  const guestMove = await directWrite(request(guestPath, reader.credential, "PATCH", {
     start: "2030-01-03T12:30:00+08:00", end: "2030-01-03T12:45:00+08:00", notifyGuests: true,
   }, { "If-Match": quietMove.version }));
   assert.deepEqual((await google.readCopy(access, visitorCalendar, guestCopyId!, AbortSignal.timeout(1000)))?.event.start,
     guestMove.start);
   await guestNotice(3, "event.updated");
-  assert.equal((await directWrite(request(guestPath + "/cancel", writer.credential, "POST",
+  assert.equal((await directWrite(request(guestPath + "/cancel", reader.credential, "POST",
     { notifyGuests: true }, { "If-Match": guestMove.version }))).status, "cancelled");
   assert.equal((await google.readCopy(access, visitorCalendar, guestCopyId!, AbortSignal.timeout(1000)))?.event.status,
     "cancelled");
   assert.equal(await google.readCopy(access, visitorCalendar, "absent", AbortSignal.timeout(1000)), undefined);
   await guestNotice(4, "event.cancelled");
   visitorStream.stop();
-  const quietEvent = await json(await request(createPath, writer.credential, "POST", { ...invite, notifyGuests: false },
+  const quietEvent = await json(await request(createPath, reader.credential, "POST", { ...invite, notifyGuests: false },
     { "Idempotency-Key": "synthetic-quiet-invite" }), 201);
-  assert.equal((await json(await request(canonicalPath + "/" + quietEvent.ref.eventId + "/cancel", writer.credential,
+  assert.equal((await json(await request(canonicalPath + "/" + quietEvent.ref.eventId + "/cancel", reader.credential,
     "POST", { notifyGuests: false }, { "If-Match": quietEvent.version }))).status, "cancelled");
   assert.deepEqual(guestWrites, ["create:all", "PATCH:none", "PATCH:all", "DELETE:all", "create:none", "DELETE:none"]);
 
   await pool.query("UPDATE notifications SET observed_at=now()-interval '2 minutes' WHERE connection_id=$1", [connectionId]);
   await service.tick();
-  assert.equal((await json(await request(readOnlyPath + "/notifications", readOnly.credential), 410)).error.code, "CURSOR_EXPIRED");
+  assert.equal((await json(await request(secondReaderPath + "/notifications", secondReader.credential), 410)).error.code, "CURSOR_EXPIRED");
   assert.deepEqual(await poll(), []);
   assert(refreshes > 0);
   revoke = true;
   await push(watchRecords[1]!, 7);
   await service.tick();
   assert.equal((await request(readerPath + "/notifications", reader.credential)).status, 401);
-  assert.equal((await request(createPath, creator.credential, "POST", input, createHeaders)).status, 401);
+  assert.equal((await request(createPath, reader.credential, "POST", input, createHeaders)).status, 401);
   assert.equal((await json(await request(path, owner))).status, "auth_required");
 
   revoke = false;

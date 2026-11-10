@@ -22,10 +22,6 @@ export interface ConnectOptions {
   baseUrl: string;
   getProjectCredential: Credential;
   openBrowser?: (url: string) => void | Promise<void>;
-  canRsvp?: boolean;
-  canCreate?: boolean;
-  canManage?: boolean;
-  canInvite?: boolean;
   saveGrant?: (grant: Grant) => void | Promise<void>;
   signal?: AbortSignal;
 }
@@ -229,11 +225,7 @@ export class CalendarClient {
 
   static async connect(options: ConnectOptions): Promise<CalendarClient> {
     const base = validatedUrl(options.baseUrl, true).origin;
-    requireValid(typeof options.getProjectCredential === "function" &&
-      (options.canRsvp === undefined || typeof options.canRsvp === "boolean") &&
-      (options.canCreate === undefined || typeof options.canCreate === "boolean") &&
-      (options.canManage === undefined || typeof options.canManage === "boolean") &&
-      (options.canInvite === undefined || typeof options.canInvite === "boolean"), "INVALID_ARGUMENT");
+    requireValid(typeof options.getProjectCredential === "function", "INVALID_ARGUMENT");
     const timeout = AbortSignal.timeout(15 * 60_000);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     const project = options.getProjectCredential;
@@ -247,10 +239,7 @@ export class CalendarClient {
         requireValid(matches(result.connectionId, uuid));
         const id = result.connectionId;
         const grant = object(await request(base, `/v1/connections/${id}/consumers`, project, {
-          method: "POST",
-          body: { canRsvp: options.canRsvp ?? false, ...(options.canCreate ? { canCreate: true } : {}),
-            ...(options.canManage ? { canManage: true } : {}), ...(options.canInvite ? { canInvite: true } : {}) },
-          signal,
+          method: "POST", body: {}, signal,
         }));
         requireValid(grant.connectionId === id && matches(grant.consumerId, uuid) && matches(grant.credential, credentialPattern));
         const credential = grant.credential;

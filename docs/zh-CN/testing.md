@@ -24,12 +24,6 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 | `GABRIEL_DATA_KEY` | 32 个随机字节的无填充 base64url 编码，由密钥管理系统注入 |
 | `GABRIEL_PROJECT_SESSIONS` | JSON 对象。键是部署分配的应用用户标识，值是该用户的独立 bearer，会话值采用 32 个随机字节的无填充 base64url 编码 |
 | `GABRIEL_PROJECT_SESSION_DIGESTS` | 可选 JSON 对象，为额外的项目用户提供其 bearer 的 SHA-256 摘要，采用无填充 base64url。原始 bearer 由用户的密钥存储保管 |
-| `GABRIEL_ENABLE_RSVP` | 默认 `false`。确认测试账号和主日历后才设为 `true`。SDK 配对时还需要申请 RSVP 能力 |
-| `GABRIEL_RSVP_CONNECTIONS` | 可选 JSON 数组。设置时仅其中列出的连接 ID 可获得并使用 RSVP 能力 |
-| `GABRIEL_RSVP_UNTIL_MS` | 可选 Unix 毫秒时间戳。到达该时间后停用 RSVP |
-| `GABRIEL_CREATE_SUBJECTS` | 默认空。填写以逗号分隔的项目用户标识，只为已确认账号开启创建权限。SDK 配对时还需申请创建能力 |
-| `GABRIEL_MANAGE_SUBJECTS` | 默认空。填写以逗号分隔的项目用户标识，只为已确认账号开启改期和取消权限。SDK 配对时还需申请管理能力 |
-| `GABRIEL_GUEST_SUBJECTS` | 默认空。填写以逗号分隔的项目用户标识。带来宾的写入还需配对创建或管理权限和额外的来宾权限 |
 | `HOST`、`PORT` | 默认 `127.0.0.1` 和 `8080` |
 | `GABRIEL_TICK_MS` | 工作循环间隔，默认 1,000 毫秒 |
 | `GABRIEL_CATCHUP_MS` | 定期增量补收间隔，默认 300,000 毫秒 |
@@ -37,7 +31,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 
 ## 人员与权限管理
 
-当前由部署管理员通过启动配置管理人员、项目凭据和写权限。
+当前由部署管理员通过启动配置登记人员和项目凭据。获准用户授权主日历后，配对的客户端即可读写该日历，写入范围由事件归属和 Google 授权约束。
 
 ### 开通一个同事
 
@@ -47,18 +41,11 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 
 轮换项目凭据时保留用户 ID 并替换摘要。需要解除日历绑定并撤销已有 consumer grant 时，先由该用户的项目凭据调用[断开连接接口](../../spec/api.md#http-endpoints)，再从启动配置中移除该用户。
 
-### 给客户端开通写权限
+### 写入范围与升级
 
-默认 consumer 可以查询待回复邀请和接收 SSE。写权限同时取决于服务端允许的范围和 SDK 配对时申请的能力。这样监听器可以保持只读，即使同一位用户还有另一个能写的应用。
+同一个 consumer 可以收通知、回复自己的邀请、创建单次会议，以及改期或取消自己组织的单次会议。创建、改期和取消带来宾的会议时，调用方须显式传 `notifyGuests` / `notify_guests`。例如，把自己组织的会议改到下午三点时，传 `true` 请求 Google 通知来宾，传 `false` 请求 Google 跳过通知。
 
-| 操作 | 服务端配置 | `connect()` 的选项（Node.js / Python） |
-| --- | --- | --- |
-| 回复自己的邀请 | 启用 `GABRIEL_ENABLE_RSVP`。若配置了 `GABRIEL_RSVP_CONNECTIONS`，该连接 ID 必须在列表中。若设了截止时间，必须仍在有效期内 | `canRsvp` / `can_rsvp` |
-| 在主日历创建会议 | 将项目用户 ID 加入 `GABRIEL_CREATE_SUBJECTS` | `canCreate` / `can_create` |
-| 改期或取消本人组织的会议 | 将项目用户 ID 加入 `GABRIEL_MANAGE_SUBJECTS` | `canManage` / `can_manage` |
-| 创建或管理带来宾的会议 | 具备相应的创建或管理权限，并将项目用户 ID 加入 `GABRIEL_GUEST_SUBJECTS` | 额外启用 `canInvite` / `can_invite`，每次写入明确传入 `notifyGuests` / `notify_guests` |
-
-修改服务端配置后重启服务。已有 grant 的能力在配对时确定。要给已有应用增加能力，需要配对新 consumer。新 consumer 会从保留窗口开始接收通知，应用可以按 `notificationId` 去重。[配对和投递契约](../../spec/api.md#http-endpoints)
+升级服务后，有效的旧 consumer grant 也能写入。上线前核对已登记用户和分发出去的凭据，尤其是此前只用于监听的客户端。旧的 RSVP 开关、截止时间和各操作名单配置可以从部署中移除。配对接口现在接收空 JSON 对象 `{}`，客户端与服务端应一起升级。[配对与写入契约](../../spec/api.md#http-endpoints)
 
 ## 模拟验证与部署步骤
 
@@ -71,7 +58,7 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
    npm run test:python
    ```
 
-3. 审查下方代理示例，替换域名与证书路径后将实际配置放在部署环境。为测试项目注入上表配置，保持 RSVP 关闭，再构建、迁移和启动服务。
+3. 审查下方代理示例，替换域名与证书路径后将实际配置放在部署环境。只登记已确认的测试用户，为测试项目注入上表配置，再构建、迁移和启动服务。
 
    ```bash
    npm run build
@@ -80,9 +67,9 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
    ```
 
 4. 验证公网 `GET /healthz` 返回 200。完成测试账号授权后，使用相应项目会话读取连接状态。确认 `lastSyncAt` 和 `watchExpiresAt` 非空，发出测试变更后确认 `lastWebhookAt` 推进。
-5. 在确认测试账号和日历范围后开启 RSVP，并为 B 配对具有该能力的新 consumer。按下方验收步骤记录结果。日志与验收记录只保留请求 ID、操作、错误码和必要时间戳。
-6. 验证创建时，为确认过的测试账号开启创建权限。先启动 SSE，再用 SDK 创建无来宾的合成事件，比较创建响应和 `event.created` 的事件引用。用同一个幂等键重试，确认事件引用相同。
-7. 验证改期和取消时，为同一测试账号开启管理权限并配对新的 consumer。用事件当前版本改期，等待两端 SSE 收到 `event.updated` 并确认，然后用新版本取消并等待 `event.cancelled`。
+5. 在已确认的测试账号和日历上验证 RSVP。按下方验收步骤记录结果。日志与验收记录只保留请求 ID、操作、错误码和必要时间戳。
+6. 先启动 SSE，再用 SDK 创建无来宾的合成事件，比较创建响应和 `event.created` 的事件引用。用同一个幂等键重试，确认事件引用相同。
+7. 用事件当前版本改期，等待 SSE 收到 `event.updated` 并确认，然后用新版本取消并等待 `event.cancelled`。
 8. 验证来宾时，连接两个已确认的测试账号并先启动来宾的 SSE。组织者创建、改期和取消时均显式请求通知，逐步等待来宾日历的 `invitation.received`、`event.updated` 和 `event.cancelled`。
 
 首次授权时，通过授权会话的 `oauth.phase` 和连接的 `onboarding.stage` 查看当前阶段。连接就绪后，`onboarding` 提供 OAuth 回调、首次全量同步、Watch 注册和首个 Webhook 的耗时。已有连接仍可检查就绪状态，历史耗时显示为空。[字段与计时起点](../../spec/api.md#connection-progress-and-timings)

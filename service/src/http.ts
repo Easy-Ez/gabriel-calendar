@@ -138,12 +138,8 @@ async function route(service: CalendarService, req: IncomingMessage, url: URL, s
     if (parts.length === 5 && method === "POST") {
       query(url, []);
       const owner = service.project(credential);
-      const input = await body(req, ["canRsvp", "canCreate", "canManage", "canInvite"]);
-      if (Object.values(input).some(value => typeof value !== "boolean")) throw new ApiError("INVALID_ARGUMENT");
-      return ok(await service.pair(owner, id, {
-        canRsvp: input.canRsvp === true, canCreate: input.canCreate === true, canManage: input.canManage === true,
-        canInvite: input.canInvite === true,
-      }), 201);
+      await body(req, []);
+      return ok(await service.pair(owner, id), 201);
     }
     if (parts.length === 7) {
       const consumer = segment(parts[5], uuid);

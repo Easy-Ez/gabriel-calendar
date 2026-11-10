@@ -136,13 +136,13 @@ sequenceDiagram
     G->>D: Save the consumer's delivery checkpoint
 ```
 
-Periodic sync covers missed Google callbacks. On reconnect, the same consumer resumes from its saved checkpoint. SDK writes go through the service, which checks the consumer's permission before calling Google.
+Periodic sync covers missed Google callbacks. On reconnect, the same consumer resumes from its saved checkpoint. For a write, the service validates the consumer grant and limits the operation to the linked primary calendar before calling Google.
 
 ## Highlights
 
 - **Invitation workflows.** Listen for new invitations, list invitations that need a reply, and set your own RSVP to accepted, tentative, or declined.
 - **Durable delivery.** The SDK reconnects and resumes from the last acknowledged notification. It acknowledges a notification after its handlers succeed.
-- **Event writes.** Create single timed events with an idempotency key, or update and cancel events using their current version. Writes require the corresponding permission and an explicit notification choice when guests are involved.
+- **Event writes.** Once connected, create single timed events with an idempotency key or update and cancel events you organize using their current version. Pass `notifyGuests` or `notify_guests` explicitly when guests are involved.
 
 ## Service and development
 

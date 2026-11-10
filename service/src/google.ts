@@ -450,7 +450,7 @@ export class Google {
   }
 
   async manage(access: string, calendar: string, id: string, version: string,
-    options: { allowGuests: boolean; notify?: boolean; patch?: UpdateEvent }): Promise<GoogleWrite> {
+    options: { notify?: boolean; patch?: UpdateEvent }): Promise<GoogleWrite> {
     const path = `/calendars/${encoded(calendar)}/events/${encoded(id)}`;
     const current = record(await this.calendar(access, path));
     if (!current || current.id !== id || current.status === "cancelled") throw new ApiError("NOT_FOUND");
@@ -472,8 +472,7 @@ export class Google {
       const attendee = record(value)!;
       return attendee.self !== true || attendee.organizer !== true;
     });
-    const { allowGuests, notify, patch } = options;
-    if (hasGuests && !allowGuests) throw new ApiError("FORBIDDEN");
+    const { notify, patch } = options;
     if (hasGuests && notify === undefined) throw new ApiError("INVALID_ARGUMENT");
     const writePath = path + (hasGuests && notify ? "?sendUpdates=all" : "?sendUpdates=none");
     try {

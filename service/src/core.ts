@@ -49,12 +49,6 @@ export interface Settings {
   googleClientSecret: string;
   dataKey: Buffer;
   projectSessions: ReadonlyMap<string, string>; // credential digest → deployment-assigned subject
-  rsvpEnabled: boolean;
-  rsvpConnections?: ReadonlySet<string>;
-  rsvpUntilMs?: number;
-  createSubjects?: ReadonlySet<string>;
-  manageSubjects?: ReadonlySet<string>;
-  guestSubjects?: ReadonlySet<string>;
   catchupMs: number;
   tickMs: number;
   retentionMs: number;

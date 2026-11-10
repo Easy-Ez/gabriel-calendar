@@ -76,6 +76,18 @@ Register handlers and enter `async with client` as above. The SDK acknowledges n
 
 Register handlers for `invitation.received`, `event.created`, `event.updated`, `event.cancelled`, or `event.rsvp_changed`. RSVP accepts `accepted`, `tentative`, or `declined`. Use the `ref` and current `version` from the event snapshot when updating or cancelling.
 
-Ask the service operator to enable writes you need, then request `can_rsvp`, `can_create`, or `can_manage` when pairing the consumer. For a guest event, also request `can_invite` and set `notify_guests` explicitly on each write.
+The consumer grant supports writing to the linked primary calendar. Set `notify_guests` explicitly to `True` or `False` when creating, updating or cancelling an event with guests.
+
+For example, reschedule an event you organize and ask Google to notify the guests. Use `False` to skip the notification request.
+
+```python
+await client.events.update(
+    event.ref,
+    start="2030-01-03T15:00:00+08:00",
+    end="2030-01-03T15:30:00+08:00",
+    if_match=event.version,
+    notify_guests=True,
+)
+```
 
 [SDK method reference](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-surface) · [Client examples](https://github.com/Easy-Ez/gabriel-calendar/blob/main/spec/api.md#sdk-examples) · [Service operator setup](https://github.com/Easy-Ez/gabriel-calendar/blob/main/docs/zh-CN/testing.md)

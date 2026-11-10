@@ -321,13 +321,10 @@ class CalendarClient:
     async def connect(
         cls, *, base_url: str, get_project_credential: Credential,
         open_browser: Callable[[str], None | Awaitable[None]] | None = None,
-        can_rsvp: bool = False, can_create: bool = False, can_manage: bool = False, can_invite: bool = False,
         save_grant: Callable[[Grant], None | Awaitable[None]] | None = None,
     ) -> CalendarClient:
         base = validated_url(base_url, origin_only=True)
-        require(callable(get_project_credential)
-                and all(type(value) is bool for value in (can_rsvp, can_create, can_manage, can_invite)),
-                "INVALID_ARGUMENT")
+        require(callable(get_project_credential), "INVALID_ARGUMENT")
         project = get_project_credential
         try:
             async with asyncio.timeout(15 * 60):
@@ -341,15 +338,8 @@ class CalendarClient:
                     if result.get("status") == "connected":
                         connection = result.get("connectionId")
                         require(matches(connection, UUID))
-                        capabilities = {"canRsvp": can_rsvp}
-                        if can_create:
-                            capabilities["canCreate"] = True
-                        if can_manage:
-                            capabilities["canManage"] = True
-                        if can_invite:
-                            capabilities["canInvite"] = True
                         grant = object_value(await _request(
-                            base, f"/v1/connections/{connection}/consumers", project, method="POST", body=capabilities,
+                            base, f"/v1/connections/{connection}/consumers", project, method="POST", body={},
                         ))
                         require(grant.get("connectionId") == connection and matches(grant.get("consumerId"), UUID)
                                 and matches(grant.get("credential"), CREDENTIAL))
