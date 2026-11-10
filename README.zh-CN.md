@@ -4,7 +4,7 @@
 
 监听主日历的会议邀请、改期、取消和 RSVP 变化。可以查询待回复邀请、提交自己的回复，也可以创建、更新和取消单次会议。服务端处理 Google OAuth 和日历同步，SDK 通过 SSE 把变更送到你的应用。
 
-[English](README.md) · [快速上手](#快速上手) · [客户端 API](#客户端-api)
+[English](README.md) · [快速上手](#快速上手) · [客户端 API](#客户端-api) · [架构与流程](#架构与流程)
 
 ## SDK 列表
 
@@ -88,6 +88,55 @@ except KeyboardInterrupt:
 
 - [Node.js SDK 文档](sdks/node/README.md#client-api)和 [Python SDK 文档](sdks/python/README.md#client-api)列出初始化参数、事件订阅、邀请查询、RSVP 和会议写入方法。
 - [两种语言的 API 对照与示例](spec/api.md#sdk-surface)汇总方法签名。[通知 Schema](spec/schema/notification.schema.json)和[错误码](spec/api.md#events-and-errors)说明返回的数据和错误。
+
+## 架构与流程
+
+### 首次连接
+
+管理员先登记用户并发放个人项目凭据。服务在打开 Google 授权页之前，用这份凭据确认授权会绑定给谁。[人员与权限管理](docs/zh-CN/testing.md#人员与权限管理)
+
+```mermaid
+sequenceDiagram
+    actor U as 用户
+    participant S as SDK
+    participant G as Gabriel 服务
+    participant C as Google
+
+    U->>S: 运行 connect()
+    S->>G: 带个人项目凭据申请授权链接
+    G-->>S: Google 授权地址
+    S-->>U: 打开浏览器
+    U->>C: 选择账号并同意日历访问
+    C-->>U: 重定向到 Gabriel 回调地址
+    U->>G: 浏览器把授权码带到回调
+    G->>C: 交换授权码并查询主日历
+    C-->>G: 返回离线授权和主日历
+    S->>G: 查询连接状态并配对 consumer
+    G-->>S: 返回连接 ID、consumer ID 和凭据
+    Note over G,C: 后台建立首次同步基线，再注册 events.watch
+```
+
+### 日历变更如何到达应用
+
+```mermaid
+sequenceDiagram
+    participant C as Google Calendar
+    participant G as Gabriel 服务
+    participant D as PostgreSQL
+    participant S as SDK
+
+    S->>G: 带 consumer 凭据建立 SSE 长连接
+    G-->>S: ready
+    C->>G: Webhook 提示日历有变更
+    G->>C: 使用已保存的同步游标查询变更
+    C-->>G: 返回变更事件和新的同步游标
+    G->>D: 提交事件快照、同步游标和待投递通知
+    G-->>S: 通过 SSE 投递通知
+    S->>G: 处理成功后发送 ACK
+    G->>D: 保存这个 consumer 的投递位置
+```
+
+Google 漏发 Webhook 时，定期增量同步会补收。SDK 断线后使用同一个 consumer 从已确认的位置继续接收。SDK 发起写入时，服务先检查该 consumer 的权限，再调用 Google。
 
 ## 主要能力
 

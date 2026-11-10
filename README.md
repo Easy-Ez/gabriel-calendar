@@ -4,7 +4,7 @@
 
 Listen for meeting invitations, reschedules, cancellations, and RSVP changes on a user's primary calendar. Query pending invitations, reply to them, and create, update, or cancel single events. The Gabriel Calendar service handles Google OAuth and calendar sync. The SDK delivers changes to your app over SSE.
 
-[简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Client API](#client-api)
+[简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Client API](#client-api) · [Architecture](#architecture)
 
 ## SDKs
 
@@ -88,6 +88,55 @@ After the first sync completes, send a new test invitation to the connected acco
 
 - [Node.js SDK guide](sdks/node/README.md#client-api) and [Python SDK guide](sdks/python/README.md#client-api) cover client options, listening, invitation queries, RSVP, and event writes.
 - [Shared SDK contract and examples](spec/api.md#sdk-surface) show both languages side by side. See also the [notification schema](spec/schema/notification.schema.json) and [error reference](spec/api.md#events-and-errors).
+
+## Architecture
+
+### First connection
+
+The operator registers the user and issues a personal project credential. The service uses it to identify the user before opening Google consent. [User and permission setup](docs/zh-CN/testing.md#人员与权限管理)
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant S as SDK
+    participant G as Gabriel service
+    participant C as Google
+
+    U->>S: Run connect()
+    S->>G: Request an authorization link with the project credential
+    G-->>S: Google consent URL
+    S-->>U: Open the browser
+    U->>C: Choose an account and allow Calendar access
+    C-->>U: Redirect to the Gabriel callback
+    U->>G: Browser delivers the authorization code
+    G->>C: Exchange the code and look up the primary calendar
+    C-->>G: Offline access and primary calendar
+    S->>G: Check the connection and pair a consumer
+    G-->>S: Connection ID, consumer ID, and consumer credential
+    Note over G,C: Background sync builds the baseline, then registers events.watch
+```
+
+### From a calendar change to your app
+
+```mermaid
+sequenceDiagram
+    participant C as Google Calendar
+    participant G as Gabriel service
+    participant D as PostgreSQL
+    participant S as SDK
+
+    S->>G: Open SSE with the consumer credential
+    G-->>S: ready
+    C->>G: Webhook signals a calendar change
+    G->>C: Request changes with the saved sync token
+    C-->>G: Changed events and new sync token
+    G->>D: Commit the snapshot, sync token, and pending notifications
+    G-->>S: Deliver notification over SSE
+    S->>G: ACK after the handler succeeds
+    G->>D: Save the consumer's delivery checkpoint
+```
+
+Periodic sync covers missed Google callbacks. On reconnect, the same consumer resumes from its saved checkpoint. SDK writes go through the service, which checks the consumer's permission before calling Google.
 
 ## Highlights
 

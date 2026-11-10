@@ -35,6 +35,31 @@ Google 需要能通过公开信任的 TLS 证书访问 Webhook。OAuth 请求使
 | `GABRIEL_CATCHUP_MS` | 定期增量补收间隔，默认 300,000 毫秒 |
 | `GABRIEL_RETENTION_MS` | 投递保留期，默认 604,800,000 毫秒 |
 
+## 人员与权限管理
+
+当前由部署管理员通过启动配置管理人员、项目凭据和写权限。
+
+### 开通一个同事
+
+1. 为同事分配一个稳定的项目用户 ID，例如 `pilot_01`。它是 Gabriel 用来绑定主日历的内部标识。项目仍处于 External / Testing 时，也要在 Google OAuth 的测试用户名单加入该同事的 Google 账号。
+2. 在批准的密钥管理系统中为该用户发放独立的项目凭据。服务端在 `GABRIEL_PROJECT_SESSION_DIGESTS` 中登记从项目用户 ID 到凭据摘要的映射。摘要是对**凭据字符串**计算 SHA-256 后得到的无填充 base64url 值。保留其他用户的配置，重启 Gabriel 服务后生效。
+3. 通过密钥管理系统将原始凭据注入同事的客户端。他调用 SDK `connect()` 并在 Google 页面授权，服务将他的主日历绑定到 `pilot_01`。SDK 配对后获得自己的 consumer grant，日常读写和 SSE 使用这份 grant。
+
+轮换项目凭据时保留用户 ID 并替换摘要。需要解除日历绑定并撤销已有 consumer grant 时，先由该用户的项目凭据调用[断开连接接口](../../spec/api.md#http-endpoints)，再从启动配置中移除该用户。
+
+### 给客户端开通写权限
+
+默认 consumer 可以查询待回复邀请和接收 SSE。写权限同时取决于服务端允许的范围和 SDK 配对时申请的能力。这样监听器可以保持只读，即使同一位用户还有另一个能写的应用。
+
+| 操作 | 服务端配置 | `connect()` 的选项（Node.js / Python） |
+| --- | --- | --- |
+| 回复自己的邀请 | 启用 `GABRIEL_ENABLE_RSVP`。若配置了 `GABRIEL_RSVP_CONNECTIONS`，该连接 ID 必须在列表中。若设了截止时间，必须仍在有效期内 | `canRsvp` / `can_rsvp` |
+| 在主日历创建会议 | 将项目用户 ID 加入 `GABRIEL_CREATE_SUBJECTS` | `canCreate` / `can_create` |
+| 改期或取消本人组织的会议 | 将项目用户 ID 加入 `GABRIEL_MANAGE_SUBJECTS` | `canManage` / `can_manage` |
+| 创建或管理带来宾的会议 | 具备相应的创建或管理权限，并将项目用户 ID 加入 `GABRIEL_GUEST_SUBJECTS` | 额外启用 `canInvite` / `can_invite`，每次写入明确传入 `notifyGuests` / `notify_guests` |
+
+修改服务端配置后重启服务。已有 grant 的能力在配对时确定。要给已有应用增加能力，需要配对新 consumer。新 consumer 会从保留窗口开始接收通知，应用可以按 `notificationId` 去重。[配对和投递契约](../../spec/api.md#http-endpoints)
+
 ## 模拟验证与部署步骤
 
 1. 安装 Node.js 22 或更新版、PostgreSQL 客户端和服务端工具。Python SDK 验证使用 Python 3.11 或更新版及 `uv`。
