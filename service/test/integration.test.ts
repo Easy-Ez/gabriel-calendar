@@ -78,6 +78,7 @@ test("service CLI migrates and serves readiness", { skip: !process.env.GABRIEL_T
       headers: { Authorization: "Basic " + Buffer.from(`admin:${adminToken}`).toString("base64") },
     });
     assert.equal(dashboard.status, 200);
+    assert.equal(dashboard.headers.get("referrer-policy"), "same-origin");
     assert.match(await dashboard.text(), /No enrollment token has been created/);
   } finally {
     child.kill("SIGTERM");

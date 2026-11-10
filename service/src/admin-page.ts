@@ -94,6 +94,8 @@ export function page(res: ServerResponse, title: string, description: string, co
   const script = copy ? `; script-src ${hash(copyScript)}` : "";
   res.setHeader("Content-Security-Policy", `default-src 'none'; frame-ancestors 'none'; form-action 'self';
     base-uri 'none'; style-src ${hash(styles)}${script}`.replace(/\s+/g, " "));
+  // Chromium omits the same-origin POST's Origin with the service-wide no-referrer policy.
+  res.setHeader("Referrer-Policy", "same-origin");
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)} · Gabriel Calendar</title>
