@@ -10,10 +10,12 @@
 
 | 语言 | 包 | 状态 |
 | --- | --- | --- |
-| TypeScript / Node.js | [npm 上的 `gabriel-calendar`](https://www.npmjs.com/package/gabriel-calendar) | 预览版（0.1） |
-| Python | [PyPI 上的 `gabriel-calendar`](https://pypi.org/project/gabriel-calendar/)，导入 `gabriel_calendar` | 预览版（0.1） |
+| TypeScript / Node.js | [npm 上的 `gabriel-calendar`](https://www.npmjs.com/package/gabriel-calendar) | 预览版 |
+| Python | [PyPI 上的 `gabriel-calendar`](https://pypi.org/project/gabriel-calendar/)，导入 `gabriel_calendar` | 预览版 |
 
 ## 快速上手
+
+0.2 用共享接入码取代个人项目凭据。请将 0.2 SDK 与支持共享接入码的服务配套使用。
 
 向管理员拿到 HTTPS 服务地址和团队共享接入码。`GABRIEL_BASE_URL` 填服务域名地址（例如 `https://calendar.example.invalid`），`GABRIEL_ENROLLMENT_TOKEN` 由密钥存储注入。`connect()` 会打开 Google 授权页，授权后 SDK 获得你自己的日历凭据。Google 仍处于 Testing 时，请选择已加入测试名单的账号。
 

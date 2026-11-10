@@ -10,10 +10,12 @@ Listen for meeting invitations, reschedules, cancellations, and RSVP changes on 
 
 | Language | Package | Status |
 | --- | --- | --- |
-| TypeScript / Node.js | [`gabriel-calendar` on npm](https://www.npmjs.com/package/gabriel-calendar) | Preview (0.1) |
-| Python | [`gabriel-calendar` on PyPI](https://pypi.org/project/gabriel-calendar/), import `gabriel_calendar` | Preview (0.1) |
+| TypeScript / Node.js | [`gabriel-calendar` on npm](https://www.npmjs.com/package/gabriel-calendar) | Preview |
+| Python | [`gabriel-calendar` on PyPI](https://pypi.org/project/gabriel-calendar/), import `gabriel_calendar` | Preview |
 
 ## Quick start
+
+Version 0.2 replaces per-user project credentials with a shared enrollment token. Use the 0.2 SDK with a service that supports shared enrollment.
 
 Ask your operator for the HTTPS base URL and the team's shared enrollment token. Set `GABRIEL_BASE_URL` to the service origin, such as `https://calendar.example.invalid`, and inject `GABRIEL_ENROLLMENT_TOKEN` from your secret store. `connect()` opens Google consent and obtains a separate credential for your account. In Google Testing mode, choose an account on the test-user list.
 
